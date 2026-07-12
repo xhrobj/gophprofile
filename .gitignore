@@ -1,30 +1,21 @@
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# Test binary, build with `go test -c`
-*.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
+# Coverage profiles
 *.out
 
-# IDE-specific files
-.idea/
+# Build artifacts
+/bin/
+
+# Local documentation
+/docs/local/
+
+# IDEs
 .vscode/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+.idea/
 
-# Log files
-*.log
+# macOS
+.DS_Store
+__MACOSX/
 
-# Environment variables
+# Environment files and local secrets
 .env
-
-# Compiled binary
-/app
+.env.*
+!.env.example
