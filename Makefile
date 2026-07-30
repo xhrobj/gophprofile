@@ -1,11 +1,15 @@
 .PHONY: \
 	show-coverage \
 	build build-server build-worker \
-	run-server  run-worker \
+	run-server run-worker \
 	test test-race \
 	coverage \
 	vet lint ci \
 	clean
+
+# файл с переменными окружения для запуска через Makefile
+ENV_FILE ?= .env
+ENV_FILE_PATH := $(abspath $(ENV_FILE))
 
 # каталоги для артефактов сборки и пути к бинарникам
 BIN_DIR := bin
@@ -32,11 +36,11 @@ build-worker:
 
 # собрать и запустить Сервер
 run-server: build-server
-	$(SERVER)
+	@set -e; set -a; [ ! -f "$(ENV_FILE_PATH)" ] || . "$(ENV_FILE_PATH)"; set +a; exec $(SERVER)
 
 # собрать и запустить Воркер
 run-worker: build-worker
-	$(WORKER)
+	@set -e; set -a; [ ! -f "$(ENV_FILE_PATH)" ] || . "$(ENV_FILE_PATH)"; set +a; exec $(WORKER)
 
 # запустить обычные тесты
 test:
