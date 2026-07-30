@@ -1,3 +1,3 @@
-module github.com/xhrobj/go-avatar-service
+module github.com/xhrobj/gophprofile
 
 go 1.26
