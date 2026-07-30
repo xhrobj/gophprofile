@@ -8,7 +8,9 @@ import (
 
 func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "Avatar Service is running!")
+		if _, err := fmt.Fprintln(w, "Avatar Service is running!"); err != nil {
+			log.Printf("failed to write response: %v", err)
+		}
 	})
 
 	log.Println("Starting server on :8080")
