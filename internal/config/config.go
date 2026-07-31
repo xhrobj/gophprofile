@@ -1,3 +1,4 @@
+// Package config загружает и проверяет конфигурацию приложения из переменных окружения.
 package config
 
 import (
@@ -9,7 +10,6 @@ import (
 )
 
 const (
-	envHTTPAddress = "HTTP_ADDRESS"
 	envDatabaseDSN = "DATABASE_DSN"
 
 	envS3Endpoint  = "S3_ENDPOINT"
@@ -22,11 +22,14 @@ const (
 	envRabbitMQExchange = "RABBITMQ_EXCHANGE"
 	envRabbitMQQueue    = "RABBITMQ_QUEUE"
 
+	envLogLevel = "LOG_LEVEL"
+
+	envHTTPAddress     = "HTTP_ADDRESS"
 	envMaxUploadSize   = "MAX_UPLOAD_SIZE"
-	envLogLevel        = "LOG_LEVEL"
 	envShutdownTimeout = "SHUTDOWN_TIMEOUT"
 )
 
+// Common содержит параметры конфигурации, общие для Сервера и Воркера.
 type Common struct {
 	DatabaseDSN string
 
@@ -38,22 +41,25 @@ type Common struct {
 
 	RabbitMQURL      string
 	RabbitMQExchange string
-	RabbitMQQueue    string
 
-	LogLevel        string
+	LogLevel string
+}
+
+// Server содержит конфигурацию HTTP-сервера.
+type Server struct {
+	Common
+	HTTPAddress     string
+	MaxUploadSize   int64
 	ShutdownTimeout time.Duration
 }
 
-type Server struct {
-	Common
-	HTTPAddress   string
-	MaxUploadSize int64
-}
-
+// Worker содержит конфигурацию фонового воркера.
 type Worker struct {
 	Common
+	RabbitMQQueue string
 }
 
+// LoadServer загружает и проверяет конфигурацию HTTP-сервера.
 func LoadServer() (Server, error) {
 	common, err := loadCommon()
 	if err != nil {
@@ -70,20 +76,35 @@ func LoadServer() (Server, error) {
 		return Server{}, err
 	}
 
+	shutdownTimeout, err := positiveDuration(envShutdownTimeout)
+	if err != nil {
+		return Server{}, err
+	}
+
 	return Server{
-		Common:        common,
-		HTTPAddress:   httpAddress,
-		MaxUploadSize: maxUploadSize,
+		Common:          common,
+		HTTPAddress:     httpAddress,
+		MaxUploadSize:   maxUploadSize,
+		ShutdownTimeout: shutdownTimeout,
 	}, nil
 }
 
+// LoadWorker загружает и проверяет конфигурацию фонового воркера.
 func LoadWorker() (Worker, error) {
 	common, err := loadCommon()
 	if err != nil {
 		return Worker{}, err
 	}
 
-	return Worker{Common: common}, nil
+	rabbitMQQueue, err := required(envRabbitMQQueue)
+	if err != nil {
+		return Worker{}, err
+	}
+
+	return Worker{
+		Common:        common,
+		RabbitMQQueue: rabbitMQQueue,
+	}, nil
 }
 
 func loadCommon() (Common, error) {
@@ -127,39 +148,30 @@ func loadCommon() (Common, error) {
 		return Common{}, err
 	}
 
-	rabbitMQQueue, err := required(envRabbitMQQueue)
-	if err != nil {
-		return Common{}, err
-	}
-
 	logLevel, err := logLevel()
 	if err != nil {
 		return Common{}, err
 	}
 
-	shutdownTimeout, err := positiveDuration(envShutdownTimeout)
-	if err != nil {
-		return Common{}, err
-	}
-
 	return Common{
-		DatabaseDSN:      databaseDSN,
-		S3Endpoint:       s3Endpoint,
-		S3AccessKey:      s3AccessKey,
-		S3SecretKey:      s3SecretKey,
-		S3Bucket:         s3Bucket,
-		S3UseSSL:         s3UseSSL,
+		DatabaseDSN: databaseDSN,
+
+		S3Endpoint:  s3Endpoint,
+		S3AccessKey: s3AccessKey,
+		S3SecretKey: s3SecretKey,
+		S3Bucket:    s3Bucket,
+		S3UseSSL:    s3UseSSL,
+
 		RabbitMQURL:      rabbitMQURL,
 		RabbitMQExchange: rabbitMQExchange,
-		RabbitMQQueue:    rabbitMQQueue,
-		LogLevel:         logLevel,
-		ShutdownTimeout:  shutdownTimeout,
+
+		LogLevel: logLevel,
 	}, nil
 }
 
 func required(name string) (string, error) {
-	value := os.Getenv(name)
-	if strings.TrimSpace(value) == "" {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
 		return "", fmt.Errorf("environment variable %s is required", name)
 	}
 
@@ -172,7 +184,7 @@ func boolean(name string) (bool, error) {
 		return false, err
 	}
 
-	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		return false, fmt.Errorf("environment variable %s must be a boolean: %w", name, err)
 	}
@@ -186,10 +198,11 @@ func positiveInt64(name string) (int64, error) {
 		return 0, err
 	}
 
-	parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("environment variable %s must be an integer: %w", name, err)
 	}
+
 	if parsed <= 0 {
 		return 0, fmt.Errorf("environment variable %s must be greater than zero", name)
 	}
@@ -203,10 +216,11 @@ func positiveDuration(name string) (time.Duration, error) {
 		return 0, err
 	}
 
-	parsed, err := time.ParseDuration(strings.TrimSpace(value))
+	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		return 0, fmt.Errorf("environment variable %s must be a duration: %w", name, err)
 	}
+
 	if parsed <= 0 {
 		return 0, fmt.Errorf("environment variable %s must be greater than zero", name)
 	}
@@ -220,7 +234,7 @@ func logLevel() (string, error) {
 		return "", err
 	}
 
-	level := strings.ToLower(strings.TrimSpace(value))
+	level := strings.ToLower(value)
 	switch level {
 	case "debug", "info", "warn", "error":
 		return level, nil

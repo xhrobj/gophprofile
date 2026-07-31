@@ -4,12 +4,19 @@
 	run-server run-worker \
 	test test-race \
 	coverage \
-	vet lint ci \
+	fmt vet lint ci \
 	clean
 
 # файл с переменными окружения для запуска через Makefile
 ENV_FILE ?= .env
-ENV_FILE_PATH := $(abspath $(ENV_FILE))
+
+-include $(ENV_FILE)
+
+export HTTP_ADDRESS MAX_UPLOAD_SIZE SHUTDOWN_TIMEOUT
+export DATABASE_DSN
+export S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET S3_USE_SSL
+export RABBITMQ_URL RABBITMQ_EXCHANGE RABBITMQ_QUEUE
+export LOG_LEVEL
 
 # каталоги для артефактов сборки и пути к бинарникам
 BIN_DIR := bin
@@ -36,11 +43,11 @@ build-worker:
 
 # собрать и запустить Сервер
 run-server: build-server
-	@set -e; set -a; [ ! -f "$(ENV_FILE_PATH)" ] || . "$(ENV_FILE_PATH)"; set +a; exec $(SERVER)
+	$(SERVER)
 
 # собрать и запустить Воркер
 run-worker: build-worker
-	@set -e; set -a; [ ! -f "$(ENV_FILE_PATH)" ] || . "$(ENV_FILE_PATH)"; set +a; exec $(WORKER)
+	$(WORKER)
 
 # запустить обычные тесты
 test:
@@ -58,6 +65,10 @@ coverage:
 		-covermode=atomic \
 		-coverprofile=coverage.out \
 		./...
+
+# отформатировать Go-код
+fmt:
+	go fmt ./...
 
 # выполнить стандартный статический анализ Go-кода
 vet:
