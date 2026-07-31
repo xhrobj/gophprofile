@@ -6,7 +6,7 @@
 
 Сервис для загрузки, обработки и хранения пользовательских аватаров.
 
-Требования к сервису описаны в [SPECIFICATION.md](SPECIFICATION.md).
+Требования к сервису описаны в [docs/SPECIFICATION.md](docs/SPECIFICATION.md).
 
 ## Запуск
 
@@ -26,12 +26,31 @@ go run ./cmd/worker
 
 ```text
 .
+├── .github/
+│   └── workflows/
+│       └── go-ci.yaml              # CI для сборки, тестов и статического анализа
+├── api/
+│   └── openapi.yml                 # OpenAPI-контракт REST API
 ├── cmd/
-│   ├── server/    # HTTP-сервер
-│   └── worker/    # обработчик фоновых задач
-├── docs/          # документация проекта
-├── web/           # статические файлы веб-интерфейса
-├── SPECIFICATION.md
+│   ├── server/
+│   │   └── main.go                 # точка входа Сервера
+│   └── worker/
+│       └── main.go                 # точка входа Воркера
+├── docs/
+│   ├── README.template.md          # исходный README шаблона
+│   └── SPECIFICATION.md            # техническое задание спринта 11
+├── internal/
+│   ├── config/                     # конфигурация Сервера и Воркера
+│   ├── handler/                    # HTTP-router и middleware
+│   ├── logger/                     # структурированное логирование
+│   ├── server/                     # lifecycle HTTP-Сервера
+│   └── worker/                     # lifecycle Воркера
+├── web/
+│   └── static/
+│       └── index.html              # веб-интерфейс загрузки аватаров
+├── .env.example                    # пример переменных окружения
+├── LICENSE
+├── Makefile
 └── README.md
 ```
 
