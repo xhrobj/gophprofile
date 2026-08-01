@@ -17,6 +17,8 @@ import (
 	"github.com/xhrobj/gophprofile/internal/config"
 	"github.com/xhrobj/gophprofile/internal/handler"
 	"github.com/xhrobj/gophprofile/internal/logger"
+	"github.com/xhrobj/gophprofile/internal/migration"
+	"github.com/xhrobj/gophprofile/internal/postgres"
 	"github.com/xhrobj/gophprofile/internal/server"
 )
 
@@ -57,6 +59,16 @@ func run(ctx context.Context) error {
 	defer func() {
 		_ = lg.Sync()
 	}()
+
+	pool, err := postgres.Open(ctx, cfg.DatabaseDSN)
+	if err != nil {
+		return fmt.Errorf("open PostgreSQL: %w", err)
+	}
+	defer pool.Close()
+
+	if err := migration.Run(pool); err != nil {
+		return fmt.Errorf("run PostgreSQL migrations: %w", err)
+	}
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddress)
 	if err != nil {

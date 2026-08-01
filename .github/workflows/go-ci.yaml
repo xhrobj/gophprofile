@@ -39,6 +39,9 @@ jobs:
       - name: (^_^) Run tests --race
         run: make test-race
 
+      - name: (o-о) Prepare environment
+        run: cp .env.example .env
+
       - name: (^_^) Run tests with coverage
         run: make coverage
 
