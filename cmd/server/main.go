@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/config"
@@ -19,7 +20,9 @@ import (
 	"github.com/xhrobj/gophprofile/internal/logger"
 	"github.com/xhrobj/gophprofile/internal/migration"
 	"github.com/xhrobj/gophprofile/internal/postgres"
+	"github.com/xhrobj/gophprofile/internal/s3"
 	"github.com/xhrobj/gophprofile/internal/server"
+	"github.com/xhrobj/gophprofile/internal/service"
 )
 
 const (
@@ -70,6 +73,21 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("run PostgreSQL migrations: %w", err)
 	}
 
+	storage, err := s3.Open(
+		ctx,
+		cfg.S3Endpoint,
+		cfg.S3AccessKey,
+		cfg.S3SecretKey,
+		cfg.S3Bucket,
+		cfg.S3UseSSL,
+	)
+	if err != nil {
+		return fmt.Errorf("open S3 storage: %w", err)
+	}
+
+	avatarRepository := postgres.NewAvatarRepository(pool)
+	avatarService := service.NewAvatarService(avatarRepository, storage, uuid.NewString, s3.OriginalKey)
+
 	listener, err := net.Listen("tcp", cfg.HTTPAddress)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", cfg.HTTPAddress, err)
@@ -82,7 +100,7 @@ func run(ctx context.Context) error {
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddress,
-		Handler:           handler.NewRouter(lg),
+		Handler:           handler.NewRouter(lg, avatarService, cfg.MaxUploadSize),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 		ErrorLog:          errorLog,

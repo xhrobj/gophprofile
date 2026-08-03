@@ -1,2 +1,2 @@
-// Package handler содержит HTTP-router и middleware Server.
+// Package handler содержит HTTP-transport Сервера: маршрутизацию, middleware и обработчики запросов.
 package handler

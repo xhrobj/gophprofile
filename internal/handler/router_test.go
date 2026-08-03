@@ -3,6 +3,7 @@ package handler
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -11,6 +12,9 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/xhrobj/gophprofile/internal/model"
+	"github.com/xhrobj/gophprofile/internal/service"
 )
 
 func TestRouter_RequestID(t *testing.T) {
@@ -30,7 +34,7 @@ func TestRouter_RequestID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var output bytes.Buffer
-			router := NewRouter(testLogger(&output))
+			router := NewRouter(testLogger(&output), noopAvatarService{}, 10<<20)
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
 			if tt.incomingRequestID != "" {
 				request.Header.Set(requestIDHeader, tt.incomingRequestID)
@@ -74,7 +78,7 @@ func TestRouter_RequestID(t *testing.T) {
 
 func TestRouter_LogsNotFoundStatus(t *testing.T) {
 	var output bytes.Buffer
-	router := NewRouter(testLogger(&output))
+	router := NewRouter(testLogger(&output), noopAvatarService{}, 10<<20)
 	request := httptest.NewRequest(http.MethodGet, "/missing", nil)
 	response := httptest.NewRecorder()
 
@@ -143,4 +147,22 @@ func assertEntryNumber(t *testing.T, entry map[string]any, key string, want int)
 	if got != float64(want) {
 		t.Errorf("log field %q = %#v, want %d", key, got, want)
 	}
+}
+
+type noopAvatarService struct{}
+
+func (noopAvatarService) Upload(context.Context, service.UploadInput) (model.Avatar, error) {
+	return model.Avatar{}, nil
+}
+
+func (noopAvatarService) Download(context.Context, service.DownloadInput) (service.DownloadOutput, error) {
+	return service.DownloadOutput{}, model.ErrAvatarNotFound
+}
+
+func (noopAvatarService) GetMetadata(context.Context, string) (model.Avatar, error) {
+	return model.Avatar{}, model.ErrAvatarNotFound
+}
+
+func (noopAvatarService) ListByUserID(context.Context, string) ([]model.Avatar, error) {
+	return nil, nil
 }
