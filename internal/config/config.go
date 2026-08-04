@@ -41,6 +41,7 @@ type Common struct {
 
 	RabbitMQURL      string
 	RabbitMQExchange string
+	RabbitMQQueue    string
 
 	LogLevel string
 }
@@ -56,7 +57,6 @@ type Server struct {
 // Worker содержит конфигурацию фонового воркера.
 type Worker struct {
 	Common
-	RabbitMQQueue string
 }
 
 // LoadServer загружает и проверяет конфигурацию HTTP-сервера.
@@ -96,15 +96,7 @@ func LoadWorker() (Worker, error) {
 		return Worker{}, err
 	}
 
-	rabbitMQQueue, err := required(envRabbitMQQueue)
-	if err != nil {
-		return Worker{}, err
-	}
-
-	return Worker{
-		Common:        common,
-		RabbitMQQueue: rabbitMQQueue,
-	}, nil
+	return Worker{Common: common}, nil
 }
 
 func loadCommon() (Common, error) {
@@ -148,6 +140,11 @@ func loadCommon() (Common, error) {
 		return Common{}, err
 	}
 
+	rabbitMQQueue, err := required(envRabbitMQQueue)
+	if err != nil {
+		return Common{}, err
+	}
+
 	logLevel, err := logLevel()
 	if err != nil {
 		return Common{}, err
@@ -164,6 +161,7 @@ func loadCommon() (Common, error) {
 
 		RabbitMQURL:      rabbitMQURL,
 		RabbitMQExchange: rabbitMQExchange,
+		RabbitMQQueue:    rabbitMQQueue,
 
 		LogLevel: logLevel,
 	}, nil

@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	avatarID42 = "00000000-0000-0000-0000-000000000042"
-	avatarID69 = "00000000-0000-0000-0000-000000000069"
-	avatarID99 = "00000000-0000-0000-0000-000000000099"
+	avatarID42 = "c0decafe-babe-4bed-b042-feeddeadbeef"
+	avatarID69 = "c0decafe-babe-4bed-b069-feeddeadbeef"
+	avatarID99 = "c0decafe-babe-4bed-b099-feeddeadbeef"
 )
 
 func TestIntegration_PostgreSQLAvatarRepository_CreateReadAndList(t *testing.T) {
@@ -90,7 +90,7 @@ func TestIntegration_PostgreSQLAvatarRepository_CreateReadAndList(t *testing.T) 
 		)
 	}
 
-	_, err = repository.GetByID(ctx, "00000000-0000-0000-0000-000000000001")
+	_, err = repository.GetByID(ctx, "c0decafe-babe-4bed-b001-feeddeadbeef")
 	if !errors.Is(err, model.ErrAvatarNotFound) {
 		t.Errorf("GetByID() missing avatar error = %v, want ErrAvatarNotFound", err)
 	}
@@ -182,6 +182,36 @@ func TestIntegration_PostgreSQLAvatarRepository_Processing(t *testing.T) {
 	}
 	if failedStored.ProcessingStatus != model.ProcessingStatusFailed {
 		t.Errorf("failed avatar ProcessingStatus = %q, want %q", failedStored.ProcessingStatus, model.ProcessingStatusFailed)
+	}
+}
+
+func TestIntegration_PostgreSQLAvatarRepository_DeletePermanent(t *testing.T) {
+	ctx, pool := openMigratedTestDatabase(t)
+	repository := postgres.NewAvatarRepository(pool)
+
+	avatar, err := repository.Create(ctx, newAvatar(avatarID42, "alice", "avatar.jpg"))
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if err := repository.DeletePermanent(ctx, avatar.ID); err != nil {
+		t.Fatalf("DeletePermanent() error = %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(
+		ctx,
+		"SELECT COUNT(*) FROM avatars WHERE id = $1",
+		avatar.ID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count deleted avatar rows: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("deleted avatar row count = %d, want 0", count)
+	}
+
+	if err := repository.DeletePermanent(ctx, avatar.ID); !errors.Is(err, model.ErrAvatarNotFound) {
+		t.Errorf("second DeletePermanent() error = %v, want ErrAvatarNotFound", err)
 	}
 }
 

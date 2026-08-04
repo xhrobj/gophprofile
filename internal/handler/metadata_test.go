@@ -106,14 +106,14 @@ func TestMetadataHandler_ListByUserID(t *testing.T) {
 			CreatedAt:        createdAt,
 		},
 		{
-			ID:               "00000000-0000-0000-0000-000000000043",
+			ID:               "c0decafe-babe-4bed-b043-feeddeadbeef",
 			UserID:           "Alice",
 			UploadStatus:     model.UploadStatusCompleted,
 			ProcessingStatus: model.ProcessingStatusPending,
 			CreatedAt:        createdAt.Add(-time.Minute),
 		},
 		{
-			ID:               "00000000-0000-0000-0000-000000000044",
+			ID:               "c0decafe-babe-4bed-b044-feeddeadbeef",
 			UserID:           "Alice",
 			UploadStatus:     model.UploadStatusFailed,
 			ProcessingStatus: model.ProcessingStatusPending,

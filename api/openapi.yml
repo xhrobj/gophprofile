@@ -52,15 +52,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/AvatarUploadResponse'
               example:
-                id: 00000000-0000-0000-0000-000000000042
+                id: c0decafe-babe-4bed-b00d-feeddeadbeef
                 user_id: Alice
-                url: /api/v1/avatars/00000000-0000-0000-0000-000000000042
+                url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef
                 status: processing
                 created_at: '2026-07-30T12:00:00Z'
         '400':
           $ref: '#/components/responses/BadRequest'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/avatars/{avatar_id}:
@@ -140,7 +142,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AvatarMetadata'
               example:
-                id: 00000000-0000-0000-0000-000000000042
+                id: c0decafe-babe-4bed-b00d-feeddeadbeef
                 user_id: Alice
                 file_name: avatar.jpg
                 mime_type: image/jpeg
@@ -150,9 +152,9 @@ paths:
                   height: 1080
                 thumbnails:
                   - size: 100x100
-                    url: /api/v1/avatars/00000000-0000-0000-0000-000000000042?size=100x100
+                    url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef?size=100x100
                   - size: 300x300
-                    url: /api/v1/avatars/00000000-0000-0000-0000-000000000042?size=300x300
+                    url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef?size=300x300
                 upload_status: completed
                 processing_status: completed
                 created_at: '2026-07-30T12:00:00Z'
@@ -241,9 +243,9 @@ paths:
                 $ref: '#/components/schemas/AvatarList'
               example:
                 avatars:
-                  - id: 00000000-0000-0000-0000-000000000042
+                  - id: c0decafe-babe-4bed-b00d-feeddeadbeef
                     user_id: Alice
-                    url: /api/v1/avatars/00000000-0000-0000-0000-000000000042
+                    url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef
                     status: completed
                     created_at: '2026-07-30T12:00:00Z'
                 total: 1
@@ -309,7 +311,7 @@ components:
       schema:
         type: string
         format: uuid
-      example: 00000000-0000-0000-0000-000000000042
+      example: c0decafe-babe-4bed-b00d-feeddeadbeef
     UserID:
       name: user_id
       in: path
@@ -342,7 +344,7 @@ components:
           example:
             error: invalid_request
             details: request parameters are invalid
-            request_id: 00000000000000000000000000000042
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
     Forbidden:
       description: Пользователь не имеет права выполнить операцию.
       content:
@@ -352,7 +354,7 @@ components:
           example:
             error: forbidden
             details: Eve can only delete her own avatars
-            request_id: 00000000000000000000000000000042
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
     NotFound:
       description: Аватарка или пользователь не найдены.
       content:
@@ -362,7 +364,7 @@ components:
           example:
             error: not_found
             details: avatar not found
-            request_id: 00000000000000000000000000000042
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
     PayloadTooLarge:
       description: Размер файла превышает 10 MiB.
       content:
@@ -373,7 +375,17 @@ components:
             error: file_too_large
             details: maximum upload size is 10485760 bytes
             max_size: 10485760
-            request_id: 00000000000000000000000000000042
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
+    ServiceUnavailable:
+      description: Сервис временно не может поставить аватарку в очередь на обработку.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: service_unavailable
+            details: service temporarily unavailable
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
     InternalServerError:
       description: Внутренняя ошибка сервиса.
       content:
@@ -383,7 +395,7 @@ components:
           example:
             error: internal_error
             details: internal server error
-            request_id: 00000000000000000000000000000042
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
   schemas:
     AvatarUploadResponse:
       type: object

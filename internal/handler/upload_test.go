@@ -20,7 +20,7 @@ import (
 
 const (
 	testMaxUploadSize = 10 << 20
-	testAvatarID      = "00000000-0000-0000-0000-000000000042"
+	testAvatarID      = "c0decafe-babe-4bed-b042-feeddeadbeef"
 )
 
 type fakeAvatarUploader struct {
@@ -253,6 +253,12 @@ func TestUploadHandler_ServiceError(t *testing.T) {
 			uploadErr:  service.ErrInvalidImageFormat,
 			wantStatus: http.StatusBadRequest,
 			wantError:  "invalid_file_format",
+		},
+		{
+			name:       "reports temporary service unavailability",
+			uploadErr:  service.ErrServiceUnavailable,
+			wantStatus: http.StatusServiceUnavailable,
+			wantError:  "service_unavailable",
 		},
 		{
 			name:       "hides internal error",

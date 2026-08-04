@@ -8,6 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/minio/minio-go/v7 v7.2.1
+	github.com/rabbitmq/amqp091-go v1.13.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/image v0.44.0
 )

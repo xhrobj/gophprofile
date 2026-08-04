@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 	"github.com/xhrobj/gophprofile/internal/config"
 	"github.com/xhrobj/gophprofile/internal/handler"
 	"github.com/xhrobj/gophprofile/internal/logger"
@@ -85,8 +86,18 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("open S3 storage: %w", err)
 	}
 
+	publisher, err := rabbitmq.OpenPublisher(cfg.RabbitMQURL, cfg.RabbitMQExchange, cfg.RabbitMQQueue)
+	if err != nil {
+		return fmt.Errorf("open RabbitMQ publisher: %w", err)
+	}
+	defer func() {
+		if closeErr := publisher.Close(); closeErr != nil {
+			lg.Warn("failed to close RabbitMQ publisher", zap.Error(closeErr))
+		}
+	}()
+
 	avatarRepository := postgres.NewAvatarRepository(pool)
-	avatarService := service.NewAvatarService(avatarRepository, storage, uuid.NewString, s3.OriginalKey)
+	avatarService := service.NewAvatarService(avatarRepository, storage, publisher, uuid.NewString, s3.OriginalKey)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddress)
 	if err != nil {

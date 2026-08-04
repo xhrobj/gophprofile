@@ -12,7 +12,7 @@ import (
 	"github.com/xhrobj/gophprofile/internal/model"
 )
 
-const avatarID42 = "00000000-0000-0000-0000-000000000042"
+const avatarID42 = "c0decafe-babe-4bed-b042-feeddeadbeef"
 
 type repositoryCall struct {
 	avatarID string
@@ -20,11 +20,13 @@ type repositoryCall struct {
 }
 
 type fakeAvatarRepository struct {
-	createErr    error
-	updateErrors []error
+	createErr          error
+	updateErrors       []error
+	deletePermanentErr error
 
-	createCalls []model.Avatar
-	updateCalls []repositoryCall
+	createCalls        []model.Avatar
+	updateCalls        []repositoryCall
+	deletePermanentIDs []string
 }
 
 type fakeAvatarStorage struct {
@@ -39,11 +41,18 @@ type fakeAvatarStorage struct {
 	deleteKeys     []string
 }
 
+type fakeAvatarEventPublisher struct {
+	err   error
+	calls []model.Avatar
+}
+
 var (
 	errCreateMetadata = errors.New("create metadata")
 	errPutOriginal    = errors.New("put original")
 	errUpdateStatus   = errors.New("update status")
 	errDeleteOriginal = errors.New("delete original")
+	errPublishEvent   = errors.New("publish event")
+	errDeleteMetadata = errors.New("delete metadata")
 )
 
 func TestAvatarService_Upload(t *testing.T) {
@@ -55,19 +64,24 @@ func TestAvatarService_Upload(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		createErr       error
-		putErr          error
-		updateErrors    []error
-		deleteErr       error
-		wantErrors      []error
-		wantPutCalls    int
-		wantUpdateCalls []repositoryCall
-		wantDeleteKeys  []string
+		name                  string
+		createErr             error
+		putErr                error
+		updateErrors          []error
+		deleteErr             error
+		publishErr            error
+		deletePermanentErr    error
+		wantErrors            []error
+		wantPutCalls          int
+		wantPublishCalls      int
+		wantUpdateCalls       []repositoryCall
+		wantDeleteKeys        []string
+		wantDeleteMetadataIDs []string
 	}{
 		{
-			name:         "uploads original",
-			wantPutCalls: 1,
+			name:             "uploads original and publishes event",
+			wantPutCalls:     1,
+			wantPublishCalls: 1,
 			wantUpdateCalls: []repositoryCall{
 				{avatarID: avatarID42, status: model.UploadStatusCompleted},
 			},
@@ -107,6 +121,33 @@ func TestAvatarService_Upload(t *testing.T) {
 			},
 			wantDeleteKeys: []string{"originals/Alice/" + avatarID42 + "/avatar.png"},
 		},
+
+		{
+			name:             "compensates publish error",
+			publishErr:       errPublishEvent,
+			wantErrors:       []error{ErrServiceUnavailable, errPublishEvent},
+			wantPutCalls:     1,
+			wantPublishCalls: 1,
+			wantUpdateCalls: []repositoryCall{
+				{avatarID: avatarID42, status: model.UploadStatusCompleted},
+			},
+			wantDeleteKeys:        []string{"originals/Alice/" + avatarID42 + "/avatar.png"},
+			wantDeleteMetadataIDs: []string{avatarID42},
+		},
+		{
+			name:               "joins publish compensation errors",
+			deleteErr:          errDeleteOriginal,
+			publishErr:         errPublishEvent,
+			deletePermanentErr: errDeleteMetadata,
+			wantErrors:         []error{ErrServiceUnavailable, errPublishEvent, errDeleteOriginal, errDeleteMetadata},
+			wantPutCalls:       1,
+			wantPublishCalls:   1,
+			wantUpdateCalls: []repositoryCall{
+				{avatarID: avatarID42, status: model.UploadStatusCompleted},
+			},
+			wantDeleteKeys:        []string{"originals/Alice/" + avatarID42 + "/avatar.png"},
+			wantDeleteMetadataIDs: []string{avatarID42},
+		},
 		{
 			name:         "joins compensation errors",
 			updateErrors: []error{errUpdateStatus, errUpdateStatus},
@@ -124,14 +165,16 @@ func TestAvatarService_Upload(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repository := &fakeAvatarRepository{
-				createErr:    tt.createErr,
-				updateErrors: append([]error(nil), tt.updateErrors...),
+				createErr:          tt.createErr,
+				updateErrors:       append([]error(nil), tt.updateErrors...),
+				deletePermanentErr: tt.deletePermanentErr,
 			}
 			storage := &fakeAvatarStorage{
 				putErr:    tt.putErr,
 				deleteErr: tt.deleteErr,
 			}
-			service := newTestAvatarService(repository, storage)
+			publisher := &fakeAvatarEventPublisher{err: tt.publishErr}
+			service := newTestAvatarService(repository, storage, publisher)
 
 			avatar, err := service.Upload(context.Background(), input)
 			assertErrors(t, err, tt.wantErrors)
@@ -147,6 +190,18 @@ func TestAvatarService_Upload(t *testing.T) {
 			}
 			if !reflect.DeepEqual(storage.deleteKeys, tt.wantDeleteKeys) {
 				t.Errorf("Delete() keys = %#v, want %#v", storage.deleteKeys, tt.wantDeleteKeys)
+			}
+			if len(publisher.calls) != tt.wantPublishCalls {
+				t.Errorf("PublishAvatarUploaded() calls = %d, want %d", len(publisher.calls), tt.wantPublishCalls)
+			}
+			if !reflect.DeepEqual(repository.deletePermanentIDs, tt.wantDeleteMetadataIDs) {
+				t.Errorf("DeletePermanent() IDs = %#v, want %#v", repository.deletePermanentIDs, tt.wantDeleteMetadataIDs)
+			}
+			if len(publisher.calls) == 1 {
+				published := publisher.calls[0]
+				if published.ID != avatarID42 || published.UserID != "Alice" || published.S3Key != "originals/Alice/"+avatarID42+"/avatar.png" {
+					t.Errorf("PublishAvatarUploaded() avatar = %+v, want uploaded Alice avatar", published)
+				}
 			}
 
 			created := repository.createCalls[0]
@@ -181,7 +236,7 @@ func TestAvatarService_Upload(t *testing.T) {
 func TestAvatarService_Upload_InvalidImageFormat(t *testing.T) {
 	repository := &fakeAvatarRepository{}
 	storage := &fakeAvatarStorage{}
-	service := newTestAvatarService(repository, storage)
+	service := newTestAvatarService(repository, storage, &fakeAvatarEventPublisher{})
 
 	_, err := service.Upload(context.Background(), UploadInput{
 		UserID:   "Alice",
@@ -199,10 +254,15 @@ func TestAvatarService_Upload_InvalidImageFormat(t *testing.T) {
 	}
 }
 
-func newTestAvatarService(repository AvatarRepository, storage AvatarStorage) *AvatarService {
+func newTestAvatarService(
+	repository AvatarRepository,
+	storage AvatarStorage,
+	publisher AvatarEventPublisher,
+) *AvatarService {
 	return NewAvatarService(
 		repository,
 		storage,
+		publisher,
 		func() string { return avatarID42 },
 		func(userID, avatarID, fileName string) string {
 			return "originals/" + userID + "/" + avatarID + "/" + fileName
@@ -286,6 +346,18 @@ func (r *fakeAvatarRepository) UpdateUploadStatus(
 	r.updateErrors = r.updateErrors[1:]
 
 	return err
+}
+
+func (r *fakeAvatarRepository) DeletePermanent(_ context.Context, avatarID string) error {
+	r.deletePermanentIDs = append(r.deletePermanentIDs, avatarID)
+
+	return r.deletePermanentErr
+}
+
+func (p *fakeAvatarEventPublisher) PublishAvatarUploaded(_ context.Context, avatar model.Avatar) error {
+	p.calls = append(p.calls, avatar)
+
+	return p.err
 }
 
 func (s *fakeAvatarStorage) Put(

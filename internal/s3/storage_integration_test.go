@@ -47,8 +47,8 @@ func TestIntegration_MinIOAvatarStorage(t *testing.T) {
 		t.Fatalf("Ping() error = %v", err)
 	}
 
-	key := s3.OriginalKey("alice", "00000000-0000-0000-0000-000000000042", "avatar.jpg")
-	thumbnailKey := s3.ThumbnailKey("alice", "00000000-0000-0000-0000-000000000042", model.ThumbnailSize100x100)
+	key := s3.OriginalKey("alice", "c0decafe-babe-4bed-b042-feeddeadbeef", "avatar.jpg")
+	thumbnailKey := s3.ThumbnailKey("alice", "c0decafe-babe-4bed-b042-feeddeadbeef", model.ThumbnailSize100x100)
 	contentType := "image/jpeg"
 	want := []byte("avatar-image-data")
 

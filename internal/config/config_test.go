@@ -9,7 +9,6 @@ import (
 func TestLoadServer(t *testing.T) {
 	setValidEnvironment(t)
 	t.Setenv(envLogLevel, "WARN")
-	t.Setenv(envRabbitMQQueue, "")
 
 	got, err := LoadServer()
 	if err != nil {
@@ -28,6 +27,7 @@ func TestLoadServer(t *testing.T) {
 
 			RabbitMQURL:      "amqp://guest:guest@localhost:5672/",
 			RabbitMQExchange: "avatars.exchange",
+			RabbitMQQueue:    "avatars.processing",
 
 			LogLevel: "warn",
 		},
@@ -64,10 +64,10 @@ func TestLoadWorker(t *testing.T) {
 
 			RabbitMQURL:      "amqp://guest:guest@localhost:5672/",
 			RabbitMQExchange: "avatars.exchange",
+			RabbitMQQueue:    "avatars.processing",
 
 			LogLevel: "info",
 		},
-		RabbitMQQueue: "avatars.processing",
 	}
 
 	if got != want {

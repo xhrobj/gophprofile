@@ -206,6 +206,23 @@ func (r *AvatarRepository) CompleteProcessing(
 	return nil
 }
 
+// DeletePermanent физически удаляет запись аватарки для компенсации незавершённого сценария загрузки.
+func (r *AvatarRepository) DeletePermanent(ctx context.Context, avatarID string) error {
+	commandTag, err := r.pool.Exec(
+		ctx,
+		`DELETE FROM avatars WHERE id = $1`,
+		avatarID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete avatar permanently: %w", err)
+	}
+	if commandTag.RowsAffected() == 0 {
+		return fmt.Errorf("delete avatar permanently: %w", model.ErrAvatarNotFound)
+	}
+
+	return nil
+}
+
 // SoftDelete помечает аватарку удалённой, не удаляя запись физически.
 func (r *AvatarRepository) SoftDelete(ctx context.Context, avatarID string) error {
 	commandTag, err := r.pool.Exec(

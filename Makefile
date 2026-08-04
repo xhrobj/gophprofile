@@ -2,7 +2,9 @@
 	show-coverage \
 	build build-server build-worker \
 	s3-up \
-	db-up db-down db-connect db-erase \
+	db-up db-connect \
+	rabbitmq-up \
+	infra-up infra-down infra-erase \
 	run-server run-worker \
 	test-all test test-race test-integration \
 	coverage \
@@ -24,8 +26,8 @@ export LOG_LEVEL
 export HTTP_ADDRESS MAX_UPLOAD_SIZE SHUTDOWN_TIMEOUT
 
 # команда Docker Compose с выбранным env-файлом
-# !!!: для целей db-*, s3-up, run-*, test-integration, coverage и ci
-# требуется env-файл с переменными POSTGRES_* и S3_*
+# !!!: для целей s3-up, db-*, rabbitmq-up, infra-*, run-*, test-integration, coverage и ci
+# требуется env-файл с переменными POSTGRES_*, S3_* и RABBITMQ_*
 #
 # NOTE: создать локальный env-файл: `cp .env.example .env`
 COMPOSE := docker compose --env-file $(ENV_FILE)
@@ -63,24 +65,32 @@ s3-up:
 db-up:
 	$(COMPOSE) up -d --wait postgres
 
-# остановить и удалить контейнер PostgreSQL без удаления данных
-db-down:
-	$(COMPOSE) down
-
 # подключиться к PostgreSQL через psql
 db-connect:
 	$(COMPOSE) exec postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
 
-# удалить контейнер PostgreSQL и локальные данные
-db-erase:
+# создать (при необходимости) и запустить локальный RabbitMQ
+# и дождаться его готовности
+rabbitmq-up:
+	$(COMPOSE) up -d --wait rabbitmq
+
+# запустить локальную инфраструктуру
+infra-up: s3-up db-up rabbitmq-up
+
+# остановить и удалить контейнеры локальной инфраструктуры без удаления данных
+infra-down:
+	$(COMPOSE) down
+
+# удалить контейнеры локальной инфраструктуры и локальные данные
+infra-erase:
 	$(COMPOSE) down -v
 
 # собрать и запустить Сервер
-run-server: db-up build-server
+run-server: infra-up build-server
 	$(SERVER)
 
 # собрать и запустить Воркер
-run-worker: db-up build-worker
+run-worker: infra-up build-worker
 	$(WORKER)
 
 # запустить обычные и интеграционные тесты
@@ -94,13 +104,13 @@ test:
 test-race:
 	go test -race ./...
 
-# запустить интеграционные тесты с локальными PostgreSQL и MinIO
-test-integration: s3-up db-up
+# запустить интеграционные тесты с локальными PostgreSQL, MinIO и RabbitMQ
+test-integration: infra-up
 	go test -tags=integration -count=1 ./...
 
 # запустить обычные и интеграционные тесты
 # и сохранить атомарный профиль покрытия всего проекта
-coverage: s3-up db-up
+coverage: infra-up
 	go test \
 		-count=1 \
 		-tags=integration \

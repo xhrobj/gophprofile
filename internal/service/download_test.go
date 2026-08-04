@@ -54,7 +54,7 @@ func TestAvatarService_Download(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repository := &downloadRepository{avatar: avatar}
 			storage := &downloadStorage{content: []byte("image")}
-			avatarService := NewAvatarService(repository, storage, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+			avatarService := NewAvatarService(repository, storage, &fakeAvatarEventPublisher{}, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 
 			output, err := avatarService.Download(context.Background(), tt.input)
 			if err != nil {
@@ -100,7 +100,7 @@ func TestAvatarService_DownloadError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repository := &downloadRepository{avatar: tt.avatar, err: tt.repoErr}
 			storage := &downloadStorage{err: tt.storageErr}
-			avatarService := NewAvatarService(repository, storage, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+			avatarService := NewAvatarService(repository, storage, &fakeAvatarEventPublisher{}, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 
 			_, err := avatarService.Download(context.Background(), tt.input)
 			if err == nil {
@@ -135,6 +135,8 @@ func (r *downloadRepository) ListByUserID(_ context.Context, id string) ([]model
 func (r *downloadRepository) UpdateUploadStatus(context.Context, string, model.UploadStatus) error {
 	return nil
 }
+
+func (r *downloadRepository) DeletePermanent(context.Context, string) error { return nil }
 
 func (s *downloadStorage) Put(context.Context, string, io.Reader, int64, string) error { return nil }
 

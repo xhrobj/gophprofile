@@ -17,6 +17,7 @@ type AvatarRepository interface {
 	GetCurrentByUserID(ctx context.Context, userID string) (model.Avatar, error)
 	ListByUserID(ctx context.Context, userID string) ([]model.Avatar, error)
 	UpdateUploadStatus(ctx context.Context, avatarID string, status model.UploadStatus) error
+	DeletePermanent(ctx context.Context, avatarID string) error
 }
 
 // AvatarStorage описывает операции с объектным хранилищем, необходимые application-сервису.
@@ -24,6 +25,11 @@ type AvatarStorage interface {
 	Put(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, keys ...string) error
+}
+
+// AvatarEventPublisher публикует события, необходимые application-сервису.
+type AvatarEventPublisher interface {
+	PublishAvatarUploaded(ctx context.Context, avatar model.Avatar) error
 }
 
 // IDGenerator создаёт идентификатор новой аватарки.
@@ -43,6 +49,7 @@ type UploadInput struct {
 type AvatarService struct {
 	repository       AvatarRepository
 	storage          AvatarStorage
+	publisher        AvatarEventPublisher
 	generateID       IDGenerator
 	buildOriginalKey OriginalKeyBuilder
 }
@@ -51,18 +58,20 @@ type AvatarService struct {
 func NewAvatarService(
 	repository AvatarRepository,
 	storage AvatarStorage,
+	publisher AvatarEventPublisher,
 	generateID IDGenerator,
 	buildOriginalKey OriginalKeyBuilder,
 ) *AvatarService {
 	return &AvatarService{
 		repository:       repository,
 		storage:          storage,
+		publisher:        publisher,
 		generateID:       generateID,
 		buildOriginalKey: buildOriginalKey,
 	}
 }
 
-// Upload создаёт метаданные аватарки, сохраняет оригинал и завершает синхронную часть загрузки.
+// Upload создаёт метаданные аватарки, сохраняет оригинал и публикует событие для фоновой обработки.
 func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (model.Avatar, error) {
 	metadata, err := inspectImage(input.Content)
 	if err != nil {
@@ -120,6 +129,31 @@ func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (model.Av
 	}
 
 	avatar.UploadStatus = model.UploadStatusCompleted
+
+	// здесь остается известное crash-window между фиксацией completed и публикацией события
+	if err := s.publisher.PublishAvatarUploaded(ctx, avatar); err != nil {
+		deleteOriginalErr := s.storage.Delete(ctx, key)
+		deleteMetadataErr := s.repository.DeletePermanent(ctx, avatar.ID)
+
+		resultErr := errors.Join(
+			ErrServiceUnavailable,
+			fmt.Errorf("publish avatar uploaded event: %w", err),
+		)
+		if deleteOriginalErr != nil {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("delete avatar original after publish failure: %w", deleteOriginalErr),
+			)
+		}
+		if deleteMetadataErr != nil {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("delete avatar metadata after publish failure: %w", deleteMetadataErr),
+			)
+		}
+
+		return model.Avatar{}, resultErr
+	}
 
 	return avatar, nil
 }

@@ -72,7 +72,8 @@ func (h *uploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Content:  file.content,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidImageFormat) {
+		switch {
+		case errors.Is(err, service.ErrInvalidImageFormat):
 			writeError(
 				w,
 				r,
@@ -81,15 +82,26 @@ func (h *uploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"supported formats: jpeg, png, webp",
 				0,
 			)
-
-			return
+		case errors.Is(err, service.ErrServiceUnavailable):
+			logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).Error(
+				"failed to publish avatar processing event",
+				zap.Error(err),
+			)
+			writeError(
+				w,
+				r,
+				http.StatusServiceUnavailable,
+				"service_unavailable",
+				"service temporarily unavailable",
+				0,
+			)
+		default:
+			logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).Error(
+				"failed to upload avatar",
+				zap.Error(err),
+			)
+			writeError(w, r, http.StatusInternalServerError, "internal_error", "internal server error", 0)
 		}
-
-		logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).Error(
-			"failed to upload avatar",
-			zap.Error(err),
-		)
-		writeError(w, r, http.StatusInternalServerError, "internal_error", "internal server error", 0)
 
 		return
 	}
