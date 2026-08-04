@@ -139,6 +139,10 @@ func (r *downloadRepository) UpdateUploadStatus(context.Context, string, model.U
 
 func (r *downloadRepository) DeletePermanent(context.Context, string) error { return nil }
 
+func (r *downloadRepository) SoftDelete(context.Context, string) error { return nil }
+
+func (r *downloadRepository) RestoreDeleted(context.Context, string) error { return nil }
+
 func (s *downloadStorage) Put(context.Context, string, io.Reader, int64, string) error { return nil }
 
 func (s *downloadStorage) Get(_ context.Context, key string) (io.ReadCloser, error) {

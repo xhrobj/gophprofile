@@ -124,6 +124,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/avatars/{avatar_id}/metadata:
@@ -224,6 +226,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/users/{user_id}/avatars:
@@ -377,7 +381,7 @@ components:
             max_size: 10485760
             request_id: faceb00cf00dfeeddeadbeefc0decafe
     ServiceUnavailable:
-      description: Сервис временно не может поставить аватарку в очередь на обработку.
+      description: Сервис временно не может завершить операцию из-за недоступности брокера сообщений.
       content:
         application/json:
           schema:

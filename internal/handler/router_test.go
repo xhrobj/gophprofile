@@ -17,6 +17,8 @@ import (
 	"github.com/xhrobj/gophprofile/internal/service"
 )
 
+type noopAvatarService struct{}
+
 func TestRouter_RequestID(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -92,6 +94,30 @@ func TestRouter_LogsNotFoundStatus(t *testing.T) {
 	assertEntryNumber(t, entry, "status", http.StatusNotFound)
 }
 
+func (noopAvatarService) Upload(context.Context, service.UploadInput) (model.Avatar, error) {
+	return model.Avatar{}, nil
+}
+
+func (noopAvatarService) Download(context.Context, service.DownloadInput) (service.DownloadOutput, error) {
+	return service.DownloadOutput{}, model.ErrAvatarNotFound
+}
+
+func (noopAvatarService) GetMetadata(context.Context, string) (model.Avatar, error) {
+	return model.Avatar{}, model.ErrAvatarNotFound
+}
+
+func (noopAvatarService) ListByUserID(context.Context, string) ([]model.Avatar, error) {
+	return nil, nil
+}
+
+func (noopAvatarService) DeleteByID(context.Context, string, string) error {
+	return nil
+}
+
+func (noopAvatarService) DeleteCurrentByUserID(context.Context, string, string) error {
+	return nil
+}
+
 func testLogger(output *bytes.Buffer) *zap.Logger {
 	core := zapcore.NewCore(
 		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
@@ -147,22 +173,4 @@ func assertEntryNumber(t *testing.T, entry map[string]any, key string, want int)
 	if got != float64(want) {
 		t.Errorf("log field %q = %#v, want %d", key, got, want)
 	}
-}
-
-type noopAvatarService struct{}
-
-func (noopAvatarService) Upload(context.Context, service.UploadInput) (model.Avatar, error) {
-	return model.Avatar{}, nil
-}
-
-func (noopAvatarService) Download(context.Context, service.DownloadInput) (service.DownloadOutput, error) {
-	return service.DownloadOutput{}, model.ErrAvatarNotFound
-}
-
-func (noopAvatarService) GetMetadata(context.Context, string) (model.Avatar, error) {
-	return model.Avatar{}, model.ErrAvatarNotFound
-}
-
-func (noopAvatarService) ListByUserID(context.Context, string) ([]model.Avatar, error) {
-	return nil, nil
 }

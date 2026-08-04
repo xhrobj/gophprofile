@@ -15,6 +15,7 @@ func NewRouter(baseLogger *zap.Logger, avatarService interface {
 	avatarUploader
 	avatarDownloader
 	avatarMetadataReader
+	avatarDeleter
 }, maxUploadSize int64) http.Handler {
 	router := chi.NewRouter()
 
@@ -22,14 +23,19 @@ func NewRouter(baseLogger *zap.Logger, avatarService interface {
 	router.Use(accessLogMiddleware(baseLogger))
 
 	router.Get("/", rootHandler(baseLogger))
+
 	upload := newUploadHandler(avatarService, maxUploadSize, baseLogger)
 	download := newDownloadHandler(avatarService, baseLogger)
 	metadata := newMetadataHandler(avatarService, baseLogger)
+	deleteAvatar := newDeleteHandler(avatarService, baseLogger)
 
 	router.Post("/api/v1/avatars", upload.ServeHTTP)
 	router.Get("/api/v1/avatars/{avatarID}", download.byID)
+	router.Delete("/api/v1/avatars/{avatarID}", deleteAvatar.byID)
 	router.Get("/api/v1/avatars/{avatarID}/metadata", metadata.byID)
+
 	router.Get("/api/v1/users/{userID}/avatar", download.currentByUserID)
+	router.Delete("/api/v1/users/{userID}/avatar", deleteAvatar.currentByUserID)
 	router.Get("/api/v1/users/{userID}/avatars", metadata.listByUserID)
 
 	return router

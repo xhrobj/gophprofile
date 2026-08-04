@@ -289,10 +289,22 @@ func (r *fakeAvatarRepository) DeletePermanent(_ context.Context, avatarID strin
 	return r.deletePermanentErr
 }
 
+func (*fakeAvatarRepository) SoftDelete(context.Context, string) error {
+	return nil
+}
+
+func (*fakeAvatarRepository) RestoreDeleted(context.Context, string) error {
+	return nil
+}
+
 func (p *fakeAvatarEventPublisher) PublishAvatarUploaded(_ context.Context, avatar model.Avatar) error {
 	p.calls = append(p.calls, avatar)
 
 	return p.err
+}
+
+func (*fakeAvatarEventPublisher) PublishAvatarDeleted(context.Context, model.Avatar) error {
+	return nil
 }
 
 func (s *fakeAvatarStorage) Put(

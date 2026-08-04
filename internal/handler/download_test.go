@@ -28,6 +28,11 @@ type fakeAvatarAPI struct {
 	listAvatars []model.Avatar
 	listErr     error
 	listCalls   []string
+
+	deleteByIDErr      error
+	deleteCurrentErr   error
+	deleteByIDCalls    [][2]string
+	deleteCurrentCalls [][2]string
 }
 
 func TestDownloadHandler(t *testing.T) {
@@ -145,4 +150,14 @@ func (f *fakeAvatarAPI) GetMetadata(_ context.Context, avatarID string) (model.A
 func (f *fakeAvatarAPI) ListByUserID(_ context.Context, userID string) ([]model.Avatar, error) {
 	f.listCalls = append(f.listCalls, userID)
 	return f.listAvatars, f.listErr
+}
+
+func (f *fakeAvatarAPI) DeleteByID(_ context.Context, avatarID, requesterUserID string) error {
+	f.deleteByIDCalls = append(f.deleteByIDCalls, [2]string{avatarID, requesterUserID})
+	return f.deleteByIDErr
+}
+
+func (f *fakeAvatarAPI) DeleteCurrentByUserID(_ context.Context, userID, requesterUserID string) error {
+	f.deleteCurrentCalls = append(f.deleteCurrentCalls, [2]string{userID, requesterUserID})
+	return f.deleteCurrentErr
 }

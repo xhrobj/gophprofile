@@ -272,6 +272,20 @@ func TestIntegration_PostgreSQLAvatarRepository_SoftDelete(t *testing.T) {
 	if deletedAt == nil {
 		t.Error("deleted_at is nil, want soft-deleted row")
 	}
+
+	if err := repository.RestoreDeleted(ctx, avatar.ID); err != nil {
+		t.Fatalf("RestoreDeleted() error = %v", err)
+	}
+	restored, err := repository.GetByID(ctx, avatar.ID)
+	if err != nil {
+		t.Fatalf("GetByID() restored avatar error = %v", err)
+	}
+	if restored.ID != avatar.ID {
+		t.Errorf("restored avatar ID = %q, want %q", restored.ID, avatar.ID)
+	}
+	if err := repository.RestoreDeleted(ctx, avatar.ID); !errors.Is(err, model.ErrAvatarNotFound) {
+		t.Errorf("second RestoreDeleted() error = %v, want ErrAvatarNotFound", err)
+	}
 }
 
 func newAvatar(id, userID, fileName string) model.Avatar {

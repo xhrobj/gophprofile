@@ -18,6 +18,8 @@ type AvatarRepository interface {
 	ListByUserID(ctx context.Context, userID string) ([]model.Avatar, error)
 	UpdateUploadStatus(ctx context.Context, avatarID string, status model.UploadStatus) error
 	DeletePermanent(ctx context.Context, avatarID string) error
+	SoftDelete(ctx context.Context, avatarID string) error
+	RestoreDeleted(ctx context.Context, avatarID string) error
 }
 
 // AvatarStorage описывает операции с объектным хранилищем, необходимые application-сервису.
@@ -30,6 +32,7 @@ type AvatarStorage interface {
 // AvatarEventPublisher публикует события, необходимые application-сервису.
 type AvatarEventPublisher interface {
 	PublishAvatarUploaded(ctx context.Context, avatar model.Avatar) error
+	PublishAvatarDeleted(ctx context.Context, avatar model.Avatar) error
 }
 
 // IDGenerator создаёт идентификатор новой аватарки.

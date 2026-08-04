@@ -303,6 +303,14 @@ func (f *fakeAvatarUploader) ListByUserID(context.Context, string) ([]model.Avat
 	return nil, nil
 }
 
+func (*fakeAvatarUploader) DeleteByID(context.Context, string, string) error {
+	return nil
+}
+
+func (*fakeAvatarUploader) DeleteCurrentByUserID(context.Context, string, string) error {
+	return nil
+}
+
 func newMultipartUploadRequest(t *testing.T, userID, fileName string, content []byte) *http.Request {
 	t.Helper()
 

@@ -242,6 +242,26 @@ func (r *AvatarRepository) SoftDelete(ctx context.Context, avatarID string) erro
 	return nil
 }
 
+// RestoreDeleted снимает отметку мягкого удаления для компенсации неудачной публикации события.
+func (r *AvatarRepository) RestoreDeleted(ctx context.Context, avatarID string) error {
+	commandTag, err := r.pool.Exec(
+		ctx,
+		`UPDATE avatars
+		SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1 AND deleted_at IS NOT NULL`,
+		avatarID,
+	)
+	if err != nil {
+		return fmt.Errorf("restore deleted avatar: %w", err)
+	}
+
+	if commandTag.RowsAffected() == 0 {
+		return fmt.Errorf("restore deleted avatar: %w", model.ErrAvatarNotFound)
+	}
+
+	return nil
+}
+
 // ClaimForProcessing атомарно переводит готовую к обработке аватарку из pending в processing.
 func (r *AvatarRepository) ClaimForProcessing(ctx context.Context, avatarID string) (bool, error) {
 	commandTag, err := r.pool.Exec(
