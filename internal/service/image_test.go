@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	testImageWidth  = 3
-	testImageHeight = 2
+	testImageWidth    = 3
+	testImageHeight   = 2
+	webPFixtureWidth  = 64
+	webPFixtureHeight = 48
 )
 
 func TestInspectImage(t *testing.T) {
@@ -44,8 +46,8 @@ func TestInspectImage(t *testing.T) {
 			name:         "detects WebP",
 			content:      readWebPFixture,
 			wantMIMEType: mimeTypeWebP,
-			wantWidth:    testImageWidth,
-			wantHeight:   testImageHeight,
+			wantWidth:    webPFixtureWidth,
+			wantHeight:   webPFixtureHeight,
 		},
 		{
 			name:    "rejects GIF",
