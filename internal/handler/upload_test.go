@@ -291,6 +291,18 @@ func (f *fakeAvatarUploader) Upload(_ context.Context, input service.UploadInput
 	return f.avatar, nil
 }
 
+func (f *fakeAvatarUploader) Download(context.Context, service.DownloadInput) (service.DownloadOutput, error) {
+	return service.DownloadOutput{}, model.ErrAvatarNotFound
+}
+
+func (f *fakeAvatarUploader) GetMetadata(context.Context, string) (model.Avatar, error) {
+	return model.Avatar{}, model.ErrAvatarNotFound
+}
+
+func (f *fakeAvatarUploader) ListByUserID(context.Context, string) ([]model.Avatar, error) {
+	return nil, nil
+}
+
 func newMultipartUploadRequest(t *testing.T, userID, fileName string, content []byte) *http.Request {
 	t.Helper()
 
@@ -372,16 +384,4 @@ func decodeJSONResponse(t *testing.T, response *httptest.ResponseRecorder, targe
 	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
 		t.Fatalf("decode JSON response: %v", err)
 	}
-}
-
-func (f *fakeAvatarUploader) Download(context.Context, service.DownloadInput) (service.DownloadOutput, error) {
-	return service.DownloadOutput{}, model.ErrAvatarNotFound
-}
-
-func (f *fakeAvatarUploader) GetMetadata(context.Context, string) (model.Avatar, error) {
-	return model.Avatar{}, model.ErrAvatarNotFound
-}
-
-func (f *fakeAvatarUploader) ListByUserID(context.Context, string) ([]model.Avatar, error) {
-	return nil, nil
 }

@@ -254,71 +254,6 @@ func TestAvatarService_Upload_InvalidImageFormat(t *testing.T) {
 	}
 }
 
-func newTestAvatarService(
-	repository AvatarRepository,
-	storage AvatarStorage,
-	publisher AvatarEventPublisher,
-) *AvatarService {
-	return NewAvatarService(
-		repository,
-		storage,
-		publisher,
-		func() string { return avatarID42 },
-		func(userID, avatarID, fileName string) string {
-			return "originals/" + userID + "/" + avatarID + "/" + fileName
-		},
-	)
-}
-
-func assertErrors(t *testing.T, err error, wantErrors []error) {
-	t.Helper()
-
-	if len(wantErrors) == 0 {
-		if err != nil {
-			t.Fatalf("Upload() error = %v", err)
-		}
-		return
-	}
-
-	if err == nil {
-		t.Fatal("Upload() error = nil, want error")
-	}
-	for _, wantErr := range wantErrors {
-		if !errors.Is(err, wantErr) {
-			t.Errorf("Upload() error = %v, want %v", err, wantErr)
-		}
-	}
-}
-
-func assertCreatedAvatarInput(t *testing.T, created model.Avatar, input UploadInput) {
-	t.Helper()
-
-	if created.ID != avatarID42 {
-		t.Errorf("Create() ID = %q, want %q", created.ID, avatarID42)
-	}
-	if created.UserID != input.UserID || created.FileName != input.FileName {
-		t.Errorf("Create() avatar = %+v, want user %q and file %q", created, input.UserID, input.FileName)
-	}
-	if created.MIMEType != mimeTypePNG {
-		t.Errorf("Create() MIMEType = %q, want %q", created.MIMEType, mimeTypePNG)
-	}
-	if created.SizeBytes != int64(len(input.Content)) || created.Width != testImageWidth || created.Height != testImageHeight {
-		t.Errorf(
-			"Create() image metadata = size %d, %dx%d, want size %d, %dx%d",
-			created.SizeBytes,
-			created.Width,
-			created.Height,
-			len(input.Content),
-			testImageWidth,
-			testImageHeight,
-		)
-	}
-	wantKey := "originals/Alice/" + avatarID42 + "/avatar.png"
-	if created.S3Key != wantKey {
-		t.Errorf("Create() S3Key = %q, want %q", created.S3Key, wantKey)
-	}
-}
-
 func (r *fakeAvatarRepository) Create(_ context.Context, avatar model.Avatar) (model.Avatar, error) {
 	r.createCalls = append(r.createCalls, avatar)
 	if r.createErr != nil {
@@ -401,4 +336,69 @@ func (f *fakeAvatarRepository) ListByUserID(context.Context, string) ([]model.Av
 
 func (f *fakeAvatarStorage) Get(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(nil)), nil
+}
+
+func newTestAvatarService(
+	repository AvatarRepository,
+	storage AvatarStorage,
+	publisher AvatarEventPublisher,
+) *AvatarService {
+	return NewAvatarService(
+		repository,
+		storage,
+		publisher,
+		func() string { return avatarID42 },
+		func(userID, avatarID, fileName string) string {
+			return "originals/" + userID + "/" + avatarID + "/" + fileName
+		},
+	)
+}
+
+func assertErrors(t *testing.T, err error, wantErrors []error) {
+	t.Helper()
+
+	if len(wantErrors) == 0 {
+		if err != nil {
+			t.Fatalf("Upload() error = %v", err)
+		}
+		return
+	}
+
+	if err == nil {
+		t.Fatal("Upload() error = nil, want error")
+	}
+	for _, wantErr := range wantErrors {
+		if !errors.Is(err, wantErr) {
+			t.Errorf("Upload() error = %v, want %v", err, wantErr)
+		}
+	}
+}
+
+func assertCreatedAvatarInput(t *testing.T, created model.Avatar, input UploadInput) {
+	t.Helper()
+
+	if created.ID != avatarID42 {
+		t.Errorf("Create() ID = %q, want %q", created.ID, avatarID42)
+	}
+	if created.UserID != input.UserID || created.FileName != input.FileName {
+		t.Errorf("Create() avatar = %+v, want user %q and file %q", created, input.UserID, input.FileName)
+	}
+	if created.MIMEType != mimeTypePNG {
+		t.Errorf("Create() MIMEType = %q, want %q", created.MIMEType, mimeTypePNG)
+	}
+	if created.SizeBytes != int64(len(input.Content)) || created.Width != testImageWidth || created.Height != testImageHeight {
+		t.Errorf(
+			"Create() image metadata = size %d, %dx%d, want size %d, %dx%d",
+			created.SizeBytes,
+			created.Width,
+			created.Height,
+			len(input.Content),
+			testImageWidth,
+			testImageHeight,
+		)
+	}
+	wantKey := "originals/Alice/" + avatarID42 + "/avatar.png"
+	if created.S3Key != wantKey {
+		t.Errorf("Create() S3Key = %q, want %q", created.S3Key, wantKey)
+	}
 }

@@ -130,7 +130,6 @@ func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (model.Av
 
 	avatar.UploadStatus = model.UploadStatusCompleted
 
-	// здесь остается известное crash-window между фиксацией completed и публикацией события
 	if err := s.publisher.PublishAvatarUploaded(ctx, avatar); err != nil {
 		deleteOriginalErr := s.storage.Delete(ctx, key)
 		deleteMetadataErr := s.repository.DeletePermanent(ctx, avatar.ID)

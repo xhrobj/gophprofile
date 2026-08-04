@@ -80,7 +80,7 @@ func TestAvatarService_Download(t *testing.T) {
 	}
 }
 
-func TestAvatarService_DownloadError(t *testing.T) {
+func TestAvatarService_Download_Error(t *testing.T) {
 	avatar := model.Avatar{S3Key: "original.png", MIMEType: "image/png"}
 	tests := []struct {
 		name       string

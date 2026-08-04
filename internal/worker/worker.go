@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	maxProcessingAttempts   = 3
+	maxRetryAttempts        = 3
 	initialRetryBackoff     = 250 * time.Millisecond
 	shutdownRecoveryTimeout = 2 * time.Second
 )
@@ -47,6 +47,11 @@ type ImageProcessor interface {
 	Process(reader io.Reader) ([]imageprocessor.Thumbnail, error)
 }
 
+type retryPolicy struct {
+	maxAttempts    int
+	initialBackoff time.Duration
+}
+
 // Worker получает события из broker и обрабатывает аватары.
 type Worker struct {
 	consumer       broker.Consumer
@@ -55,11 +60,6 @@ type Worker struct {
 	imageProcessor ImageProcessor
 	logger         *zap.Logger
 	retry          retryPolicy
-}
-
-type retryPolicy struct {
-	maxAttempts    int
-	initialBackoff time.Duration
 }
 
 // New создаёт Worker с bounded retry и экспоненциальным backoff.
@@ -77,7 +77,7 @@ func New(
 		imageProcessor: imageProcessor,
 		logger:         lg,
 		retry: retryPolicy{
-			maxAttempts:    maxProcessingAttempts,
+			maxAttempts:    maxRetryAttempts,
 			initialBackoff: initialRetryBackoff,
 		},
 	}
@@ -288,8 +288,8 @@ func (w *Worker) finalizeFailure(ctx context.Context, lg *zap.Logger, message ev
 		lg.Warn("failed to clean up thumbnails after processing error", zap.Error(err))
 	}
 
-	if err := w.repository.UpdateProcessingStatus(ctx, message.AvatarID, model.ProcessingStatusFailed); err != nil {
-		lg.Warn("failed to mark avatar processing as failed", zap.Error(err))
+	if err := w.updateProcessingStatusWithRetry(ctx, lg, message.AvatarID, model.ProcessingStatusFailed); err != nil {
+		lg.Error("failed to mark avatar processing as failed; message will remain in DLQ", zap.Error(err))
 	}
 }
 
@@ -297,17 +297,64 @@ func (w *Worker) requeueOnShutdown(item broker.Delivery, lg *zap.Logger, avatarI
 	recoveryCtx, cancel := context.WithTimeout(context.Background(), shutdownRecoveryTimeout)
 	defer cancel()
 
-	if err := w.repository.UpdateProcessingStatus(recoveryCtx, avatarID, model.ProcessingStatusPending); err != nil {
-		lg.Error("failed to release avatar claim during shutdown", zap.Error(err))
-	} else {
-		lg.Info("released avatar claim during shutdown")
+	if err := w.updateProcessingStatusWithRetry(
+		recoveryCtx,
+		lg,
+		avatarID,
+		model.ProcessingStatusPending,
+	); err != nil {
+		lg.Error("failed to release avatar claim during shutdown; dead-lettering message", zap.Error(err))
+
+		if nackErr := item.Nack(false); nackErr != nil {
+			return fmt.Errorf("dead-letter %s message after failed shutdown recovery: %w", event.AvatarUploadedRoutingKey, nackErr)
+		}
+
+		return nil
 	}
 
+	lg.Info("released avatar claim during shutdown")
 	if nackErr := item.Nack(true); nackErr != nil {
 		return fmt.Errorf("requeue %s message during shutdown: %w", event.AvatarUploadedRoutingKey, nackErr)
 	}
 
 	return nil
+}
+
+func (w *Worker) updateProcessingStatusWithRetry(
+	ctx context.Context,
+	lg *zap.Logger,
+	avatarID string,
+	status model.ProcessingStatus,
+) error {
+	var resultErr error
+
+	for attempt := 1; attempt <= w.retry.maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		resultErr = w.repository.UpdateProcessingStatus(ctx, avatarID, status)
+		if resultErr == nil {
+			return nil
+		}
+		if attempt == w.retry.maxAttempts {
+			break
+		}
+
+		lg.Warn(
+			"update avatar processing status attempt failed",
+			zap.String("status", string(status)),
+			zap.Int("attempt", attempt),
+			zap.Int("max_attempts", w.retry.maxAttempts),
+			zap.Error(resultErr),
+		)
+
+		if err := waitRetry(ctx, w.retry.backoff(attempt)); err != nil {
+			return err
+		}
+	}
+
+	return resultErr
 }
 
 func (p retryPolicy) backoff(failedAttempt int) time.Duration {

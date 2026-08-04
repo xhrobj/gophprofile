@@ -46,13 +46,13 @@ type claimResult struct {
 }
 
 type fakeRepository struct {
-	claimResults    []claimResult
-	claimCalls      int
-	completeCalls   int
-	completedKeys   map[model.ThumbnailSize]string
-	completeErr     error
-	statusUpdates   []model.ProcessingStatus
-	updateStatusErr error
+	claimResults       []claimResult
+	claimCalls         int
+	completeCalls      int
+	completedKeys      map[model.ThumbnailSize]string
+	completeErr        error
+	statusUpdates      []model.ProcessingStatus
+	updateStatusErrors []error
 }
 
 type putCall struct {
@@ -193,8 +193,8 @@ func TestWorker_HandleDelivery_RetriesTransientFailure(t *testing.T) {
 		t.Fatalf("handleDelivery() error = %v", err)
 	}
 
-	if storage.getCalls != maxProcessingAttempts {
-		t.Errorf("Storage.Get() calls = %d, want %d", storage.getCalls, maxProcessingAttempts)
+	if storage.getCalls != maxRetryAttempts {
+		t.Errorf("Storage.Get() calls = %d, want %d", storage.getCalls, maxRetryAttempts)
 	}
 	if item.ackCalls != 1 || len(item.nackCalls) != 0 {
 		t.Errorf("delivery ack/nack = %d/%v, want 1/[]", item.ackCalls, item.nackCalls)
@@ -224,8 +224,8 @@ func TestWorker_HandleDelivery_DeadLettersAfterRetries(t *testing.T) {
 	if item.ackCalls != 0 || !reflect.DeepEqual(item.nackCalls, []bool{false}) {
 		t.Fatalf("delivery ack/nack = %d/%v, want 0/[false]", item.ackCalls, item.nackCalls)
 	}
-	if storage.getCalls != maxProcessingAttempts {
-		t.Errorf("Storage.Get() calls = %d, want %d", storage.getCalls, maxProcessingAttempts)
+	if storage.getCalls != maxRetryAttempts {
+		t.Errorf("Storage.Get() calls = %d, want %d", storage.getCalls, maxRetryAttempts)
 	}
 	if !reflect.DeepEqual(repository.statusUpdates, []model.ProcessingStatus{model.ProcessingStatusFailed}) {
 		t.Errorf("processing status updates = %v, want [failed]", repository.statusUpdates)
@@ -237,6 +237,42 @@ func TestWorker_HandleDelivery_DeadLettersAfterRetries(t *testing.T) {
 	}
 	if !reflect.DeepEqual(storage.deletedKeys, wantDeleted) {
 		t.Errorf("Storage.Delete() keys = %v, want %v", storage.deletedKeys, wantDeleted)
+	}
+}
+
+func TestWorker_HandleDelivery_DeadLettersWhenFailedStatusUpdateFails(t *testing.T) {
+	repository := &fakeRepository{
+		claimResults: []claimResult{{claimed: true}},
+		updateStatusErrors: []error{
+			errors.New("PostgreSQL unavailable"),
+			errors.New("PostgreSQL unavailable"),
+			errors.New("PostgreSQL unavailable"),
+		},
+	}
+	storage := &fakeStorage{
+		getErrors: []error{
+			errors.New("S3 unavailable"),
+			errors.New("S3 unavailable"),
+			errors.New("S3 unavailable"),
+		},
+	}
+	item := newFakeDelivery(t, testEvent())
+	avatarWorker := newTestWorker(repository, storage, &fakeImageProcessor{})
+
+	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
+		t.Fatalf("handleDelivery() error = %v", err)
+	}
+
+	wantStatuses := []model.ProcessingStatus{
+		model.ProcessingStatusFailed,
+		model.ProcessingStatusFailed,
+		model.ProcessingStatusFailed,
+	}
+	if !reflect.DeepEqual(repository.statusUpdates, wantStatuses) {
+		t.Errorf("processing status updates = %v, want %v", repository.statusUpdates, wantStatuses)
+	}
+	if !reflect.DeepEqual(item.nackCalls, []bool{false}) {
+		t.Errorf("delivery nack calls = %v, want [false]", item.nackCalls)
 	}
 }
 
@@ -317,6 +353,44 @@ func TestWorker_HandleDelivery_RequeuesClaimOnShutdown(t *testing.T) {
 	}
 }
 
+func TestWorker_HandleDelivery_DeadLettersWhenShutdownRecoveryFails(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	repository := &fakeRepository{
+		claimResults: []claimResult{{claimed: true}},
+		updateStatusErrors: []error{
+			errors.New("PostgreSQL unavailable"),
+			errors.New("PostgreSQL unavailable"),
+			errors.New("PostgreSQL unavailable"),
+		},
+	}
+	storage := &fakeStorage{
+		getFunc: func(ctx context.Context, _ string) (io.ReadCloser, error) {
+			cancel()
+			<-ctx.Done()
+
+			return nil, ctx.Err()
+		},
+	}
+	item := newFakeDelivery(t, testEvent())
+	avatarWorker := newTestWorker(repository, storage, &fakeImageProcessor{})
+
+	if err := avatarWorker.handleDelivery(ctx, item); err != nil {
+		t.Fatalf("handleDelivery() error = %v", err)
+	}
+
+	wantStatuses := []model.ProcessingStatus{
+		model.ProcessingStatusPending,
+		model.ProcessingStatusPending,
+		model.ProcessingStatusPending,
+	}
+	if !reflect.DeepEqual(repository.statusUpdates, wantStatuses) {
+		t.Errorf("processing status updates = %v, want %v", repository.statusUpdates, wantStatuses)
+	}
+	if !reflect.DeepEqual(item.nackCalls, []bool{false}) {
+		t.Errorf("delivery nack calls = %v, want [false]", item.nackCalls)
+	}
+}
+
 func (f *fakeConsumer) Consume(ctx context.Context) (<-chan broker.Delivery, error) {
 	if f.consumeErr != nil {
 		return nil, f.consumeErr
@@ -385,8 +459,12 @@ func (f *fakeRepository) UpdateProcessingStatus(
 	status model.ProcessingStatus,
 ) error {
 	f.statusUpdates = append(f.statusUpdates, status)
+	index := len(f.statusUpdates) - 1
+	if index < len(f.updateStatusErrors) {
+		return f.updateStatusErrors[index]
+	}
 
-	return f.updateStatusErr
+	return nil
 }
 
 func (f *fakeStorage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
@@ -434,7 +512,7 @@ func (f *fakeImageProcessor) Process(io.Reader) ([]imageprocessor.Thumbnail, err
 func newTestWorker(repository Repository, storage Storage, processor ImageProcessor) *Worker {
 	avatarWorker := New(&fakeConsumer{}, repository, storage, processor, zap.NewNop())
 	avatarWorker.retry = retryPolicy{
-		maxAttempts:    maxProcessingAttempts,
+		maxAttempts:    maxRetryAttempts,
 		initialBackoff: 0,
 	}
 

@@ -5,7 +5,6 @@ import "time"
 
 const (
 	AvatarUploadedRoutingKey    = "avatar.uploaded"
-	AvatarDeletedRoutingKey     = "avatar.deleted"
 	AvatarUploadedSchemaVersion = 1
 )
 
