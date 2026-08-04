@@ -23,9 +23,9 @@ import (
 )
 
 const (
-	maxRetryAttempts        = 3
-	initialRetryBackoff     = 250 * time.Millisecond
-	shutdownRecoveryTimeout = 2 * time.Second
+	maxRetryAttempts    = 3
+	initialRetryBackoff = 250 * time.Millisecond
+	recoveryTimeout     = 2 * time.Second
 )
 
 // Repository хранит состояние фоновой обработки аватаров.
@@ -111,20 +111,20 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error {
+	switch item.RoutingKey() {
+	case event.AvatarUploadedRoutingKey:
+		return w.handleAvatarUploadedDelivery(ctx, item)
+	case event.AvatarDeletedRoutingKey:
+		return w.handleAvatarDeletedDelivery(ctx, item)
+	default:
+		return w.rejectInvalidMessage(item, fmt.Errorf("unsupported routing key %q", item.RoutingKey()))
+	}
+}
+
+func (w *Worker) handleAvatarUploadedDelivery(ctx context.Context, item broker.Delivery) error {
 	message, err := decodeAvatarUploaded(item)
 	if err != nil {
-		w.logger.Warn(
-			"rejecting invalid broker message",
-			zap.String("message_id", item.MessageID()),
-			zap.String("routing_key", item.RoutingKey()),
-			zap.Error(err),
-		)
-
-		if nackErr := item.Nack(false); nackErr != nil {
-			return fmt.Errorf("reject invalid broker message: %w", nackErr)
-		}
-
-		return nil
+		return w.rejectInvalidMessage(item, err)
 	}
 
 	messageLogger := logger.WithMessageID(w.logger, message.MessageID).With(
@@ -145,8 +145,9 @@ func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error
 
 		return nil
 	}
+
 	if !claimed {
-		messageLogger.Info("avatar already claimed or processed; acknowledging duplicate message")
+		messageLogger.Info("avatar already claimed, processed or deleted; acknowledging duplicate message")
 
 		if ackErr := item.Ack(); ackErr != nil {
 			return fmt.Errorf("ack duplicate %s message: %w", event.AvatarUploadedRoutingKey, ackErr)
@@ -160,8 +161,26 @@ func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error
 			return w.requeueOnShutdown(item, messageLogger, message.AvatarID)
 		}
 
+		if errors.Is(err, model.ErrAvatarNotFound) {
+			messageLogger.Info("avatar was deleted during processing; cleaning up thumbnails")
+			if cleanupErr := w.deleteKeysWithRetry(ctx, messageLogger, thumbnailKeys(message)...); cleanupErr != nil {
+				messageLogger.Error("failed to clean up thumbnails for deleted avatar", zap.Error(cleanupErr))
+				if nackErr := item.Nack(false); nackErr != nil {
+					return fmt.Errorf("dead-letter deleted %s message after cleanup failure: %w", event.AvatarUploadedRoutingKey, nackErr)
+				}
+
+				return nil
+			}
+
+			if ackErr := item.Ack(); ackErr != nil {
+				return fmt.Errorf("ack deleted %s message: %w", event.AvatarUploadedRoutingKey, ackErr)
+			}
+
+			return nil
+		}
+
 		messageLogger.Error("avatar processing failed", zap.Error(err))
-		w.finalizeFailure(ctx, messageLogger, message)
+		w.finalizeFailure(messageLogger, message)
 
 		if nackErr := item.Nack(false); nackErr != nil {
 			return fmt.Errorf("dead-letter failed %s message: %w", event.AvatarUploadedRoutingKey, nackErr)
@@ -175,6 +194,57 @@ func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error
 	}
 
 	messageLogger.Info("avatar processing completed")
+
+	return nil
+}
+
+func (w *Worker) handleAvatarDeletedDelivery(ctx context.Context, item broker.Delivery) error {
+	message, err := decodeAvatarDeleted(item)
+	if err != nil {
+		return w.rejectInvalidMessage(item, err)
+	}
+
+	messageLogger := logger.WithMessageID(w.logger, message.MessageID).With(
+		zap.String("avatar_id", message.AvatarID),
+	)
+
+	if err := w.deleteKeysWithRetry(ctx, messageLogger, message.S3Keys...); err != nil {
+		if ctx.Err() != nil {
+			if nackErr := item.Nack(true); nackErr != nil {
+				return fmt.Errorf("requeue %s message during shutdown: %w", event.AvatarDeletedRoutingKey, nackErr)
+			}
+
+			return nil
+		}
+
+		messageLogger.Error("avatar file deletion failed", zap.Error(err))
+		if nackErr := item.Nack(false); nackErr != nil {
+			return fmt.Errorf("dead-letter failed %s message: %w", event.AvatarDeletedRoutingKey, nackErr)
+		}
+
+		return nil
+	}
+
+	if ackErr := item.Ack(); ackErr != nil {
+		return fmt.Errorf("ack %s message: %w", event.AvatarDeletedRoutingKey, ackErr)
+	}
+
+	messageLogger.Info("avatar files deleted")
+
+	return nil
+}
+
+func (w *Worker) rejectInvalidMessage(item broker.Delivery, err error) error {
+	w.logger.Warn(
+		"rejecting invalid broker message",
+		zap.String("message_id", item.MessageID()),
+		zap.String("routing_key", item.RoutingKey()),
+		zap.Error(err),
+	)
+
+	if nackErr := item.Nack(false); nackErr != nil {
+		return fmt.Errorf("reject invalid broker message: %w", nackErr)
+	}
 
 	return nil
 }
@@ -223,7 +293,9 @@ func (w *Worker) processWithRetry(ctx context.Context, lg *zap.Logger, message e
 		if resultErr == nil {
 			return nil
 		}
-		if errors.Is(resultErr, imageprocessor.ErrInvalidImage) || attempt == w.retry.maxAttempts {
+		if errors.Is(resultErr, imageprocessor.ErrInvalidImage) ||
+			errors.Is(resultErr, model.ErrAvatarNotFound) ||
+			attempt == w.retry.maxAttempts {
 			return resultErr
 		}
 
@@ -279,22 +351,59 @@ func (w *Worker) processOnce(ctx context.Context, message event.AvatarUploaded) 
 	return nil
 }
 
-func (w *Worker) finalizeFailure(ctx context.Context, lg *zap.Logger, message event.AvatarUploaded) {
-	thumbnailKeys := []string{
-		s3.ThumbnailKey(message.UserID, message.AvatarID, model.ThumbnailSize100x100),
-		s3.ThumbnailKey(message.UserID, message.AvatarID, model.ThumbnailSize300x300),
-	}
-	if err := w.storage.Delete(ctx, thumbnailKeys...); err != nil {
-		lg.Warn("failed to clean up thumbnails after processing error", zap.Error(err))
+func (w *Worker) deleteKeysWithRetry(ctx context.Context, lg *zap.Logger, keys ...string) error {
+	var resultErr error
+
+	for attempt := 1; attempt <= w.retry.maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		resultErr = w.storage.Delete(ctx, keys...)
+		if resultErr == nil {
+			return nil
+		}
+		if attempt == w.retry.maxAttempts {
+			break
+		}
+
+		lg.Warn(
+			"delete avatar files attempt failed",
+			zap.Int("attempt", attempt),
+			zap.Int("max_attempts", w.retry.maxAttempts),
+			zap.Error(resultErr),
+		)
+
+		if err := waitRetry(ctx, w.retry.backoff(attempt)); err != nil {
+			return err
+		}
 	}
 
-	if err := w.updateProcessingStatusWithRetry(ctx, lg, message.AvatarID, model.ProcessingStatusFailed); err != nil {
+	return resultErr
+}
+
+func (w *Worker) finalizeFailure(lg *zap.Logger, message event.AvatarUploaded) {
+	statusCtx, cancelStatus := context.WithTimeout(context.Background(), recoveryTimeout)
+	if err := w.updateProcessingStatusWithRetry(
+		statusCtx,
+		lg,
+		message.AvatarID,
+		model.ProcessingStatusFailed,
+	); err != nil {
 		lg.Error("failed to mark avatar processing as failed; message will remain in DLQ", zap.Error(err))
+	}
+	cancelStatus()
+
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), recoveryTimeout)
+	defer cancelCleanup()
+
+	if err := w.storage.Delete(cleanupCtx, thumbnailKeys(message)...); err != nil {
+		lg.Warn("failed to clean up thumbnails after processing error", zap.Error(err))
 	}
 }
 
 func (w *Worker) requeueOnShutdown(item broker.Delivery, lg *zap.Logger, avatarID string) error {
-	recoveryCtx, cancel := context.WithTimeout(context.Background(), shutdownRecoveryTimeout)
+	recoveryCtx, cancel := context.WithTimeout(context.Background(), recoveryTimeout)
 	defer cancel()
 
 	if err := w.updateProcessingStatusWithRetry(
@@ -361,6 +470,13 @@ func (p retryPolicy) backoff(failedAttempt int) time.Duration {
 	return p.initialBackoff * time.Duration(1<<(failedAttempt-1))
 }
 
+func thumbnailKeys(message event.AvatarUploaded) []string {
+	return []string{
+		s3.ThumbnailKey(message.UserID, message.AvatarID, model.ThumbnailSize100x100),
+		s3.ThumbnailKey(message.UserID, message.AvatarID, model.ThumbnailSize300x300),
+	}
+}
+
 func decodeAvatarUploaded(item broker.Delivery) (event.AvatarUploaded, error) {
 	if item.RoutingKey() != event.AvatarUploadedRoutingKey {
 		return event.AvatarUploaded{}, fmt.Errorf("unsupported routing key %q", item.RoutingKey())
@@ -388,6 +504,40 @@ func decodeAvatarUploaded(item broker.Delivery) (event.AvatarUploaded, error) {
 	}
 	if message.CreatedAt.IsZero() {
 		return event.AvatarUploaded{}, errors.New("created_at must not be zero")
+	}
+
+	return message, nil
+}
+
+func decodeAvatarDeleted(item broker.Delivery) (event.AvatarDeleted, error) {
+	if item.RoutingKey() != event.AvatarDeletedRoutingKey {
+		return event.AvatarDeleted{}, fmt.Errorf("unsupported routing key %q", item.RoutingKey())
+	}
+
+	var message event.AvatarDeleted
+	if err := json.Unmarshal(item.Body(), &message); err != nil {
+		return event.AvatarDeleted{}, fmt.Errorf("decode %s event: %w", event.AvatarDeletedRoutingKey, err)
+	}
+
+	if message.SchemaVersion != event.AvatarDeletedSchemaVersion {
+		return event.AvatarDeleted{}, fmt.Errorf("unsupported schema version %d", message.SchemaVersion)
+	}
+	if err := uuid.Validate(message.MessageID); err != nil {
+		return event.AvatarDeleted{}, fmt.Errorf("invalid message_id: %w", err)
+	}
+	if err := uuid.Validate(message.AvatarID); err != nil {
+		return event.AvatarDeleted{}, fmt.Errorf("invalid avatar_id: %w", err)
+	}
+	if len(message.S3Keys) == 0 {
+		return event.AvatarDeleted{}, errors.New("s3_keys must not be empty")
+	}
+	for _, key := range message.S3Keys {
+		if strings.TrimSpace(key) == "" {
+			return event.AvatarDeleted{}, errors.New("s3_keys must not contain empty values")
+		}
+	}
+	if message.CreatedAt.IsZero() {
+		return event.AvatarDeleted{}, errors.New("created_at must not be zero")
 	}
 
 	return message, nil

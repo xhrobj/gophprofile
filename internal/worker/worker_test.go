@@ -26,16 +26,12 @@ const (
 	testMessageID = "c0decafe-babe-4bed-b043-feeddeadbeef"
 )
 
-type fakeConsumer struct {
-	consumeErr error
-}
+type fakeConsumer struct{}
 
 type fakeDelivery struct {
 	body       []byte
 	messageID  string
 	routingKey string
-	ackErr     error
-	nackErr    error
 	ackCalls   int
 	nackCalls  []bool
 }
@@ -53,6 +49,7 @@ type fakeRepository struct {
 	completeErr        error
 	statusUpdates      []model.ProcessingStatus
 	updateStatusErrors []error
+	updateStatusFunc   func(context.Context, string, model.ProcessingStatus) error
 }
 
 type putCall struct {
@@ -62,15 +59,17 @@ type putCall struct {
 }
 
 type fakeStorage struct {
-	content     []byte
-	getErrors   []error
-	getFunc     func(context.Context, string) (io.ReadCloser, error)
-	getCalls    int
-	getKeys     []string
-	puts        []putCall
-	putErr      error
-	deletedKeys []string
-	deleteErr   error
+	content      []byte
+	getErrors    []error
+	getFunc      func(context.Context, string) (io.ReadCloser, error)
+	getCalls     int
+	getKeys      []string
+	puts         []putCall
+	putErr       error
+	deletedKeys  []string
+	deleteCalls  int
+	deleteErrors []error
+	deleteFunc   func(context.Context, ...string) error
 }
 
 type fakeImageProcessor struct {
@@ -114,7 +113,7 @@ func TestWorker_HandleDelivery_ProcessesAvatar(t *testing.T) {
 	storage := &fakeStorage{content: []byte("original")}
 	processor := &fakeImageProcessor{thumbnails: testThumbnails()}
 	message := testEvent()
-	item := newFakeDelivery(t, message)
+	item := newFakeUploadedDelivery(t, message)
 	avatarWorker := newTestWorker(repository, storage, processor)
 
 	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
@@ -155,7 +154,7 @@ func TestWorker_HandleDelivery_AcknowledgesDuplicate(t *testing.T) {
 	repository := &fakeRepository{claimResults: []claimResult{{claimed: false}}}
 	storage := &fakeStorage{}
 	processor := &fakeImageProcessor{}
-	item := newFakeDelivery(t, testEvent())
+	item := newFakeUploadedDelivery(t, testEvent())
 	avatarWorker := newTestWorker(repository, storage, processor)
 
 	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
@@ -175,6 +174,77 @@ func TestWorker_HandleDelivery_AcknowledgesDuplicate(t *testing.T) {
 	}
 }
 
+func TestWorker_HandleDelivery_RetriesClaim(t *testing.T) {
+	errPostgreSQLUnavailable := errors.New("PostgreSQL unavailable")
+	repository := &fakeRepository{
+		claimResults: []claimResult{
+			{err: errPostgreSQLUnavailable},
+			{err: errPostgreSQLUnavailable},
+			{claimed: true},
+		},
+	}
+	storage := &fakeStorage{content: []byte("original")}
+	processor := &fakeImageProcessor{thumbnails: testThumbnails()}
+	item := newFakeUploadedDelivery(t, testEvent())
+	avatarWorker := newTestWorker(repository, storage, processor)
+
+	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
+		t.Fatalf("handleDelivery() error = %v", err)
+	}
+
+	if repository.claimCalls != maxRetryAttempts {
+		t.Errorf("ClaimForProcessing() calls = %d, want %d", repository.claimCalls, maxRetryAttempts)
+	}
+	if item.ackCalls != 1 || len(item.nackCalls) != 0 {
+		t.Errorf("delivery ack/nack = %d/%v, want 1/[]", item.ackCalls, item.nackCalls)
+	}
+	if storage.getCalls != 1 || processor.calls != 1 || repository.completeCalls != 1 {
+		t.Errorf(
+			"processing side effects: get=%d process=%d complete=%d, want 1/1/1",
+			storage.getCalls,
+			processor.calls,
+			repository.completeCalls,
+		)
+	}
+}
+
+func TestWorker_HandleDelivery_DeadLettersWhenClaimRetriesExhausted(t *testing.T) {
+	errPostgreSQLUnavailable := errors.New("PostgreSQL unavailable")
+	repository := &fakeRepository{
+		claimResults: []claimResult{
+			{err: errPostgreSQLUnavailable},
+			{err: errPostgreSQLUnavailable},
+			{err: errPostgreSQLUnavailable},
+		},
+	}
+	storage := &fakeStorage{}
+	processor := &fakeImageProcessor{}
+	item := newFakeUploadedDelivery(t, testEvent())
+	avatarWorker := newTestWorker(repository, storage, processor)
+
+	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
+		t.Fatalf("handleDelivery() error = %v", err)
+	}
+
+	if repository.claimCalls != maxRetryAttempts {
+		t.Errorf("ClaimForProcessing() calls = %d, want %d", repository.claimCalls, maxRetryAttempts)
+	}
+	if item.ackCalls != 0 || !reflect.DeepEqual(item.nackCalls, []bool{false}) {
+		t.Fatalf("delivery ack/nack = %d/%v, want 0/[false]", item.ackCalls, item.nackCalls)
+	}
+	if storage.getCalls != 0 || processor.calls != 0 || repository.completeCalls != 0 {
+		t.Errorf(
+			"unclaimed message side effects: get=%d process=%d complete=%d, want all zero",
+			storage.getCalls,
+			processor.calls,
+			repository.completeCalls,
+		)
+	}
+	if len(repository.statusUpdates) != 0 {
+		t.Errorf("processing status updates = %v, want none", repository.statusUpdates)
+	}
+}
+
 func TestWorker_HandleDelivery_RetriesTransientFailure(t *testing.T) {
 	repository := &fakeRepository{claimResults: []claimResult{{claimed: true}}}
 	storage := &fakeStorage{
@@ -186,7 +256,7 @@ func TestWorker_HandleDelivery_RetriesTransientFailure(t *testing.T) {
 		},
 	}
 	processor := &fakeImageProcessor{thumbnails: testThumbnails()}
-	item := newFakeDelivery(t, testEvent())
+	item := newFakeUploadedDelivery(t, testEvent())
 	avatarWorker := newTestWorker(repository, storage, processor)
 
 	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
@@ -214,7 +284,7 @@ func TestWorker_HandleDelivery_DeadLettersAfterRetries(t *testing.T) {
 		},
 	}
 	processor := &fakeImageProcessor{}
-	item := newFakeDelivery(t, testEvent())
+	item := newFakeUploadedDelivery(t, testEvent())
 	avatarWorker := newTestWorker(repository, storage, processor)
 
 	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
@@ -240,6 +310,53 @@ func TestWorker_HandleDelivery_DeadLettersAfterRetries(t *testing.T) {
 	}
 }
 
+func TestWorker_FinalizeFailure_UsesSeparateRecoveryContexts(t *testing.T) {
+	var statusCtx context.Context
+	var cleanupCtx context.Context
+	var calls []string
+
+	repository := &fakeRepository{
+		updateStatusFunc: func(ctx context.Context, _ string, _ model.ProcessingStatus) error {
+			statusCtx = ctx
+			calls = append(calls, "status")
+
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("UpdateProcessingStatus() context has no deadline")
+			}
+
+			return nil
+		},
+	}
+	storage := &fakeStorage{
+		deleteFunc: func(ctx context.Context, _ ...string) error {
+			cleanupCtx = ctx
+			calls = append(calls, "cleanup")
+
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("Storage.Delete() context has no deadline")
+			}
+
+			return nil
+		},
+	}
+	avatarWorker := newTestWorker(repository, storage, &fakeImageProcessor{})
+
+	avatarWorker.finalizeFailure(zap.NewNop(), testEvent())
+
+	if !reflect.DeepEqual(calls, []string{"status", "cleanup"}) {
+		t.Errorf("recovery calls = %v, want [status cleanup]", calls)
+	}
+	if statusCtx == cleanupCtx {
+		t.Error("recovery operations share the same context, want separate contexts")
+	}
+	if !reflect.DeepEqual(repository.statusUpdates, []model.ProcessingStatus{model.ProcessingStatusFailed}) {
+		t.Errorf("processing status updates = %v, want [failed]", repository.statusUpdates)
+	}
+	if storage.deleteCalls != 1 {
+		t.Fatalf("Storage.Delete() calls = %d, want 1", storage.deleteCalls)
+	}
+}
+
 func TestWorker_HandleDelivery_DeadLettersWhenFailedStatusUpdateFails(t *testing.T) {
 	repository := &fakeRepository{
 		claimResults: []claimResult{{claimed: true}},
@@ -256,7 +373,7 @@ func TestWorker_HandleDelivery_DeadLettersWhenFailedStatusUpdateFails(t *testing
 			errors.New("S3 unavailable"),
 		},
 	}
-	item := newFakeDelivery(t, testEvent())
+	item := newFakeUploadedDelivery(t, testEvent())
 	avatarWorker := newTestWorker(repository, storage, &fakeImageProcessor{})
 
 	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
@@ -280,7 +397,7 @@ func TestWorker_HandleDelivery_DoesNotRetryInvalidImage(t *testing.T) {
 	repository := &fakeRepository{claimResults: []claimResult{{claimed: true}}}
 	storage := &fakeStorage{content: []byte("broken image")}
 	processor := &fakeImageProcessor{err: imageprocessor.ErrInvalidImage}
-	item := newFakeDelivery(t, testEvent())
+	item := newFakeUploadedDelivery(t, testEvent())
 	avatarWorker := newTestWorker(repository, storage, processor)
 
 	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
@@ -326,6 +443,106 @@ func TestWorker_HandleDelivery_RejectsInvalidMessage(t *testing.T) {
 	}
 }
 
+func TestWorker_HandleDelivery_DeletesAvatarFiles(t *testing.T) {
+	storage := &fakeStorage{}
+	message := testDeletedEvent()
+	item := newFakeDeletedDelivery(t, message)
+	avatarWorker := newTestWorker(&fakeRepository{}, storage, &fakeImageProcessor{})
+
+	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
+		t.Fatalf("handleDelivery() error = %v", err)
+	}
+
+	if item.ackCalls != 1 || len(item.nackCalls) != 0 {
+		t.Fatalf("delivery ack/nack = %d/%v, want 1/[]", item.ackCalls, item.nackCalls)
+	}
+	if storage.deleteCalls != 1 {
+		t.Errorf("Storage.Delete() calls = %d, want 1", storage.deleteCalls)
+	}
+	if !reflect.DeepEqual(storage.deletedKeys, message.S3Keys) {
+		t.Errorf("Storage.Delete() keys = %v, want %v", storage.deletedKeys, message.S3Keys)
+	}
+}
+
+func TestWorker_HandleDelivery_RetriesAvatarFileDeletion(t *testing.T) {
+	storage := &fakeStorage{
+		deleteErrors: []error{
+			errors.New("temporary S3 error"),
+			errors.New("temporary S3 error"),
+			nil,
+		},
+	}
+	item := newFakeDeletedDelivery(t, testDeletedEvent())
+	avatarWorker := newTestWorker(&fakeRepository{}, storage, &fakeImageProcessor{})
+
+	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
+		t.Fatalf("handleDelivery() error = %v", err)
+	}
+
+	if storage.deleteCalls != maxRetryAttempts {
+		t.Errorf("Storage.Delete() calls = %d, want %d", storage.deleteCalls, maxRetryAttempts)
+	}
+	if item.ackCalls != 1 || len(item.nackCalls) != 0 {
+		t.Errorf("delivery ack/nack = %d/%v, want 1/[]", item.ackCalls, item.nackCalls)
+	}
+}
+
+func TestWorker_HandleDelivery_DeadLettersAvatarDeletionAfterRetries(t *testing.T) {
+	storage := &fakeStorage{
+		deleteErrors: []error{
+			errors.New("S3 unavailable"),
+			errors.New("S3 unavailable"),
+			errors.New("S3 unavailable"),
+		},
+	}
+	item := newFakeDeletedDelivery(t, testDeletedEvent())
+	avatarWorker := newTestWorker(&fakeRepository{}, storage, &fakeImageProcessor{})
+
+	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
+		t.Fatalf("handleDelivery() error = %v", err)
+	}
+
+	if storage.deleteCalls != maxRetryAttempts {
+		t.Errorf("Storage.Delete() calls = %d, want %d", storage.deleteCalls, maxRetryAttempts)
+	}
+	if item.ackCalls != 0 || !reflect.DeepEqual(item.nackCalls, []bool{false}) {
+		t.Errorf("delivery ack/nack = %d/%v, want 0/[false]", item.ackCalls, item.nackCalls)
+	}
+}
+
+func TestWorker_HandleDelivery_CleansThumbnailsWhenAvatarDeletedDuringProcessing(t *testing.T) {
+	repository := &fakeRepository{
+		claimResults: []claimResult{{claimed: true}},
+		completeErr:  model.ErrAvatarNotFound,
+	}
+	storage := &fakeStorage{content: []byte("original")}
+	processor := &fakeImageProcessor{thumbnails: testThumbnails()}
+	message := testEvent()
+	item := newFakeUploadedDelivery(t, message)
+	avatarWorker := newTestWorker(repository, storage, processor)
+
+	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
+		t.Fatalf("handleDelivery() error = %v", err)
+	}
+
+	if repository.completeCalls != 1 {
+		t.Errorf("CompleteProcessing() calls = %d, want 1", repository.completeCalls)
+	}
+	if item.ackCalls != 1 || len(item.nackCalls) != 0 {
+		t.Fatalf("delivery ack/nack = %d/%v, want 1/[]", item.ackCalls, item.nackCalls)
+	}
+	wantDeleted := []string{
+		s3.ThumbnailKey("Alice", testAvatarID, model.ThumbnailSize100x100),
+		s3.ThumbnailKey("Alice", testAvatarID, model.ThumbnailSize300x300),
+	}
+	if !reflect.DeepEqual(storage.deletedKeys, wantDeleted) {
+		t.Errorf("Storage.Delete() keys = %v, want %v", storage.deletedKeys, wantDeleted)
+	}
+	if len(repository.statusUpdates) != 0 {
+		t.Errorf("processing status updates = %v, want none", repository.statusUpdates)
+	}
+}
+
 func TestWorker_HandleDelivery_RequeuesClaimOnShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	repository := &fakeRepository{claimResults: []claimResult{{claimed: true}}}
@@ -338,7 +555,7 @@ func TestWorker_HandleDelivery_RequeuesClaimOnShutdown(t *testing.T) {
 		},
 	}
 	processor := &fakeImageProcessor{}
-	item := newFakeDelivery(t, testEvent())
+	item := newFakeUploadedDelivery(t, testEvent())
 	avatarWorker := newTestWorker(repository, storage, processor)
 
 	if err := avatarWorker.handleDelivery(ctx, item); err != nil {
@@ -371,7 +588,7 @@ func TestWorker_HandleDelivery_DeadLettersWhenShutdownRecoveryFails(t *testing.T
 			return nil, ctx.Err()
 		},
 	}
-	item := newFakeDelivery(t, testEvent())
+	item := newFakeUploadedDelivery(t, testEvent())
 	avatarWorker := newTestWorker(repository, storage, &fakeImageProcessor{})
 
 	if err := avatarWorker.handleDelivery(ctx, item); err != nil {
@@ -391,11 +608,7 @@ func TestWorker_HandleDelivery_DeadLettersWhenShutdownRecoveryFails(t *testing.T
 	}
 }
 
-func (f *fakeConsumer) Consume(ctx context.Context) (<-chan broker.Delivery, error) {
-	if f.consumeErr != nil {
-		return nil, f.consumeErr
-	}
-
+func (*fakeConsumer) Consume(ctx context.Context) (<-chan broker.Delivery, error) {
 	deliveries := make(chan broker.Delivery)
 	go func() {
 		<-ctx.Done()
@@ -420,13 +633,13 @@ func (f *fakeDelivery) RoutingKey() string {
 func (f *fakeDelivery) Ack() error {
 	f.ackCalls++
 
-	return f.ackErr
+	return nil
 }
 
 func (f *fakeDelivery) Nack(requeue bool) error {
 	f.nackCalls = append(f.nackCalls, requeue)
 
-	return f.nackErr
+	return nil
 }
 
 func (f *fakeRepository) ClaimForProcessing(context.Context, string) (bool, error) {
@@ -454,11 +667,15 @@ func (f *fakeRepository) CompleteProcessing(
 }
 
 func (f *fakeRepository) UpdateProcessingStatus(
-	_ context.Context,
-	_ string,
+	ctx context.Context,
+	avatarID string,
 	status model.ProcessingStatus,
 ) error {
 	f.statusUpdates = append(f.statusUpdates, status)
+	if f.updateStatusFunc != nil {
+		return f.updateStatusFunc(ctx, avatarID, status)
+	}
+
 	index := len(f.statusUpdates) - 1
 	if index < len(f.updateStatusErrors) {
 		return f.updateStatusErrors[index]
@@ -497,10 +714,18 @@ func (f *fakeStorage) Put(
 	return f.putErr
 }
 
-func (f *fakeStorage) Delete(_ context.Context, keys ...string) error {
+func (f *fakeStorage) Delete(ctx context.Context, keys ...string) error {
+	f.deleteCalls++
 	f.deletedKeys = append(f.deletedKeys, keys...)
+	if f.deleteFunc != nil {
+		return f.deleteFunc(ctx, keys...)
+	}
 
-	return f.deleteErr
+	if index := f.deleteCalls - 1; index < len(f.deleteErrors) {
+		return f.deleteErrors[index]
+	}
+
+	return nil
 }
 
 func (f *fakeImageProcessor) Process(io.Reader) ([]imageprocessor.Thumbnail, error) {
@@ -530,6 +755,20 @@ func testEvent() event.AvatarUploaded {
 	}
 }
 
+func testDeletedEvent() event.AvatarDeleted {
+	return event.AvatarDeleted{
+		MessageID: testMessageID,
+		AvatarID:  testAvatarID,
+		S3Keys: []string{
+			"originals/Alice/" + testAvatarID + "/avatar.webp",
+			s3.ThumbnailKey("Alice", testAvatarID, model.ThumbnailSize100x100),
+			s3.ThumbnailKey("Alice", testAvatarID, model.ThumbnailSize300x300),
+		},
+		SchemaVersion: event.AvatarDeletedSchemaVersion,
+		CreatedAt:     time.Date(2026, time.August, 4, 12, 0, 0, 0, time.UTC),
+	}
+}
+
 func testThumbnails() []imageprocessor.Thumbnail {
 	return []imageprocessor.Thumbnail{
 		{
@@ -545,7 +784,7 @@ func testThumbnails() []imageprocessor.Thumbnail {
 	}
 }
 
-func newFakeDelivery(t *testing.T, message event.AvatarUploaded) *fakeDelivery {
+func newFakeUploadedDelivery(t *testing.T, message event.AvatarUploaded) *fakeDelivery {
 	t.Helper()
 
 	body, err := json.Marshal(message)
@@ -557,6 +796,21 @@ func newFakeDelivery(t *testing.T, message event.AvatarUploaded) *fakeDelivery {
 		body:       body,
 		messageID:  message.MessageID,
 		routingKey: event.AvatarUploadedRoutingKey,
+	}
+}
+
+func newFakeDeletedDelivery(t *testing.T, message event.AvatarDeleted) *fakeDelivery {
+	t.Helper()
+
+	body, err := json.Marshal(message)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	return &fakeDelivery{
+		body:       body,
+		messageID:  message.MessageID,
+		routingKey: event.AvatarDeletedRoutingKey,
 	}
 }
 

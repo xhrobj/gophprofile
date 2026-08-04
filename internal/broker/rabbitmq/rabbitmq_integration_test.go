@@ -122,6 +122,101 @@ func TestIntegration_RabbitMQPublisherConsumer(t *testing.T) {
 	}
 }
 
+func TestIntegration_RabbitMQPublisherConsumer_AvatarDeleted(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), rabbitMQIntegrationTestTimeout)
+	t.Cleanup(cancel)
+
+	url := requireEnv(t, "RABBITMQ_URL")
+	exchange, queue := uniqueTopologyNames()
+	t.Cleanup(func() {
+		cleanupTopology(t, url, exchange, queue)
+	})
+
+	consumer, err := rabbitmq.OpenConsumer(url, exchange, queue)
+	if err != nil {
+		t.Fatalf("OpenConsumer() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := consumer.Close(); err != nil {
+			t.Errorf("Consumer.Close() error = %v", err)
+		}
+	})
+
+	publisher, err := rabbitmq.OpenPublisher(url, exchange, queue)
+	if err != nil {
+		t.Fatalf("OpenPublisher() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := publisher.Close(); err != nil {
+			t.Errorf("Publisher.Close() error = %v", err)
+		}
+	})
+
+	deliveries, err := consumer.Consume(ctx)
+	if err != nil {
+		t.Fatalf("Consume() error = %v", err)
+	}
+
+	avatar := model.Avatar{
+		ID:     "c0decafe-babe-4bed-b042-feeddeadbeef",
+		UserID: "Alice",
+		S3Key:  "originals/Alice/c0decafe-babe-4bed-b042-feeddeadbeef/avatar.webp",
+		ThumbnailS3Keys: map[model.ThumbnailSize]string{
+			model.ThumbnailSize100x100: "thumbnails/Alice/c0decafe-babe-4bed-b042-feeddeadbeef/100x100.jpg",
+			model.ThumbnailSize300x300: "thumbnails/Alice/c0decafe-babe-4bed-b042-feeddeadbeef/300x300.jpg",
+		},
+	}
+	if err := publisher.PublishAvatarDeleted(ctx, avatar); err != nil {
+		t.Fatalf("PublishAvatarDeleted() error = %v", err)
+	}
+
+	item := receiveDelivery(t, ctx, deliveries)
+	if item.RoutingKey() != event.AvatarDeletedRoutingKey {
+		t.Errorf("RoutingKey() = %q, want %q", item.RoutingKey(), event.AvatarDeletedRoutingKey)
+	}
+	if err := uuid.Validate(item.MessageID()); err != nil {
+		t.Errorf("MessageID() = %q, want valid UUID: %v", item.MessageID(), err)
+	}
+
+	var message event.AvatarDeleted
+	if err := json.Unmarshal(item.Body(), &message); err != nil {
+		t.Fatalf("decode delivery body: %v", err)
+	}
+	if message.MessageID != item.MessageID() {
+		t.Errorf("body message_id = %q, delivery message_id = %q", message.MessageID, item.MessageID())
+	}
+	if message.AvatarID != avatar.ID {
+		t.Errorf("body avatar_id = %q, want %q", message.AvatarID, avatar.ID)
+	}
+	wantKeys := []string{
+		avatar.S3Key,
+		avatar.ThumbnailS3Keys[model.ThumbnailSize100x100],
+		avatar.ThumbnailS3Keys[model.ThumbnailSize300x300],
+	}
+	if len(message.S3Keys) != len(wantKeys) {
+		t.Fatalf("body s3_keys length = %d, want %d", len(message.S3Keys), len(wantKeys))
+	}
+	for i := range wantKeys {
+		if message.S3Keys[i] != wantKeys[i] {
+			t.Errorf("body s3_keys[%d] = %q, want %q", i, message.S3Keys[i], wantKeys[i])
+		}
+	}
+	if message.SchemaVersion != event.AvatarDeletedSchemaVersion {
+		t.Errorf(
+			"body schema_version = %d, want %d",
+			message.SchemaVersion,
+			event.AvatarDeletedSchemaVersion,
+		)
+	}
+	if message.CreatedAt.IsZero() {
+		t.Error("body created_at is zero")
+	}
+
+	if err := item.Ack(); err != nil {
+		t.Fatalf("Ack() error = %v", err)
+	}
+}
+
 func receiveDelivery(t *testing.T, ctx context.Context, deliveries <-chan broker.Delivery) broker.Delivery {
 	t.Helper()
 

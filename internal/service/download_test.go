@@ -81,6 +81,7 @@ func TestAvatarService_Download(t *testing.T) {
 }
 
 func TestAvatarService_Download_Error(t *testing.T) {
+	errStorage := errors.New("storage")
 	avatar := model.Avatar{S3Key: "original.png", MIMEType: "image/png"}
 	tests := []struct {
 		name       string
@@ -93,7 +94,7 @@ func TestAvatarService_Download_Error(t *testing.T) {
 		{name: "rejects invalid size", input: DownloadInput{AvatarID: avatarID42, Size: "42x42"}, avatar: avatar, wantErr: ErrInvalidAvatarSize},
 		{name: "returns not found thumbnail", input: DownloadInput{AvatarID: avatarID42, Size: "100x100"}, avatar: avatar, wantErr: model.ErrAvatarNotFound},
 		{name: "returns repository error", input: DownloadInput{AvatarID: avatarID42}, repoErr: model.ErrAvatarNotFound, wantErr: model.ErrAvatarNotFound},
-		{name: "returns storage error", input: DownloadInput{AvatarID: avatarID42}, avatar: avatar, storageErr: errors.New("storage"), wantErr: errors.New("storage")},
+		{name: "returns storage error", input: DownloadInput{AvatarID: avatarID42}, avatar: avatar, storageErr: errStorage, wantErr: errStorage},
 	}
 
 	for _, tt := range tests {
@@ -106,7 +107,7 @@ func TestAvatarService_Download_Error(t *testing.T) {
 			if err == nil {
 				t.Fatal("Download() error = nil")
 			}
-			if tt.name != "returns storage error" && !errors.Is(err, tt.wantErr) {
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("Download() error = %v, want %v", err, tt.wantErr)
 			}
 		})

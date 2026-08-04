@@ -72,48 +72,21 @@ func (p *Publisher) PublishAvatarUploaded(ctx context.Context, avatar model.Avat
 		CreatedAt:     createdAt,
 	}
 
-	body, err := json.Marshal(message)
-	if err != nil {
-		return fmt.Errorf("marshal %s event: %w", event.AvatarUploadedRoutingKey, err)
+	return p.publish(ctx, event.AvatarUploadedRoutingKey, message.MessageID, message.CreatedAt, message)
+}
+
+// PublishAvatarDeleted публикует событие об объектах удалённой аватарки и ждёт подтверждения RabbitMQ.
+func (p *Publisher) PublishAvatarDeleted(ctx context.Context, avatar model.Avatar) error {
+	createdAt := time.Now().UTC()
+	message := event.AvatarDeleted{
+		MessageID:     uuid.NewString(),
+		AvatarID:      avatar.ID,
+		S3Keys:        avatarS3Keys(avatar),
+		SchemaVersion: event.AvatarDeletedSchemaVersion,
+		CreatedAt:     createdAt,
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	confirmCtx, cancel := context.WithTimeout(ctx, publisherConfirmTimeout)
-	defer cancel()
-
-	confirmation, err := p.channel.PublishWithDeferredConfirmWithContext(
-		confirmCtx,
-		p.exchange,
-		event.AvatarUploadedRoutingKey,
-		false,
-		false,
-		amqp.Publishing{
-			ContentType:  "application/json",
-			DeliveryMode: amqp.Persistent,
-			MessageId:    message.MessageID,
-			Timestamp:    message.CreatedAt,
-			Type:         event.AvatarUploadedRoutingKey,
-			Body:         body,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("publish %s event: %w", event.AvatarUploadedRoutingKey, err)
-	}
-	if confirmation == nil {
-		return fmt.Errorf("publish %s event: publisher confirms are not enabled", event.AvatarUploadedRoutingKey)
-	}
-
-	acknowledged, err := confirmation.WaitContext(confirmCtx)
-	if err != nil {
-		return fmt.Errorf("wait for %s publisher confirm: %w", event.AvatarUploadedRoutingKey, err)
-	}
-	if !acknowledged {
-		return fmt.Errorf("wait for %s publisher confirm: message was negatively acknowledged", event.AvatarUploadedRoutingKey)
-	}
-
-	return nil
+	return p.publish(ctx, event.AvatarDeletedRoutingKey, message.MessageID, message.CreatedAt, message)
 }
 
 // Close закрывает RabbitMQ channel и connection Publisher.
@@ -134,4 +107,73 @@ func (p *Publisher) Close() error {
 	}
 
 	return resultErr
+}
+
+func (p *Publisher) publish(
+	ctx context.Context,
+	routingKey string,
+	messageID string,
+	createdAt time.Time,
+	message any,
+) error {
+	body, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("marshal %s event: %w", routingKey, err)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	confirmCtx, cancel := context.WithTimeout(ctx, publisherConfirmTimeout)
+	defer cancel()
+
+	confirmation, err := p.channel.PublishWithDeferredConfirmWithContext(
+		confirmCtx,
+		p.exchange,
+		routingKey,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			MessageId:    messageID,
+			Timestamp:    createdAt,
+			Type:         routingKey,
+			Body:         body,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("publish %s event: %w", routingKey, err)
+	}
+	if confirmation == nil {
+		return fmt.Errorf("publish %s event: publisher confirms are not enabled", routingKey)
+	}
+
+	acknowledged, err := confirmation.WaitContext(confirmCtx)
+	if err != nil {
+		return fmt.Errorf("wait for %s publisher confirm: %w", routingKey, err)
+	}
+	if !acknowledged {
+		return fmt.Errorf("wait for %s publisher confirm: message was negatively acknowledged", routingKey)
+	}
+
+	return nil
+}
+
+func avatarS3Keys(avatar model.Avatar) []string {
+	keys := make([]string, 0, 3)
+	if avatar.S3Key != "" {
+		keys = append(keys, avatar.S3Key)
+	}
+
+	for _, size := range []model.ThumbnailSize{
+		model.ThumbnailSize100x100,
+		model.ThumbnailSize300x300,
+	} {
+		if key := avatar.ThumbnailS3Keys[size]; key != "" {
+			keys = append(keys, key)
+		}
+	}
+
+	return keys
 }

@@ -74,19 +74,24 @@ func declareTopology(channel *amqp.Channel, exchange, queue string) error {
 		return fmt.Errorf("declare RabbitMQ queue %q: %w", queue, err)
 	}
 
-	if err := channel.QueueBind(
-		queue,
+	for _, routingKey := range []string{
 		event.AvatarUploadedRoutingKey,
-		exchange,
-		false,
-		nil,
-	); err != nil {
-		return fmt.Errorf(
-			"bind RabbitMQ queue %q with routing key %q: %w",
+		event.AvatarDeletedRoutingKey,
+	} {
+		if err := channel.QueueBind(
 			queue,
-			event.AvatarUploadedRoutingKey,
-			err,
-		)
+			routingKey,
+			exchange,
+			false,
+			nil,
+		); err != nil {
+			return fmt.Errorf(
+				"bind RabbitMQ queue %q with routing key %q: %w",
+				queue,
+				routingKey,
+				err,
+			)
+		}
 	}
 
 	return nil
