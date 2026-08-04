@@ -9,8 +9,14 @@ import (
 	"os/signal"
 	"syscall"
 
+	"go.uber.org/zap"
+
+	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 	"github.com/xhrobj/gophprofile/internal/config"
+	"github.com/xhrobj/gophprofile/internal/imageprocessor"
 	"github.com/xhrobj/gophprofile/internal/logger"
+	"github.com/xhrobj/gophprofile/internal/postgres"
+	"github.com/xhrobj/gophprofile/internal/s3"
 	"github.com/xhrobj/gophprofile/internal/worker"
 )
 
@@ -43,7 +49,43 @@ func run(ctx context.Context) error {
 		_ = lg.Sync()
 	}()
 
-	return worker.Run(ctx, lg)
+	pool, err := postgres.Open(ctx, cfg.DatabaseDSN)
+	if err != nil {
+		return fmt.Errorf("open PostgreSQL: %w", err)
+	}
+	defer pool.Close()
+
+	storage, err := s3.Open(
+		ctx,
+		cfg.S3Endpoint,
+		cfg.S3AccessKey,
+		cfg.S3SecretKey,
+		cfg.S3Bucket,
+		cfg.S3UseSSL,
+	)
+	if err != nil {
+		return fmt.Errorf("open S3 storage: %w", err)
+	}
+
+	consumer, err := rabbitmq.OpenConsumer(cfg.RabbitMQURL, cfg.RabbitMQExchange, cfg.RabbitMQQueue)
+	if err != nil {
+		return fmt.Errorf("open RabbitMQ consumer: %w", err)
+	}
+	defer func() {
+		if closeErr := consumer.Close(); closeErr != nil {
+			lg.Warn("failed to close RabbitMQ consumer", zap.Error(closeErr))
+		}
+	}()
+
+	avatarWorker := worker.New(
+		consumer,
+		postgres.NewAvatarRepository(pool),
+		storage,
+		imageprocessor.New(),
+		lg,
+	)
+
+	return avatarWorker.Run(ctx)
 }
 
 func printBanner(output io.Writer) error {
