@@ -24,6 +24,8 @@ const (
 )
 
 type fakeAvatarUploader struct {
+	noopAvatarService
+
 	avatar model.Avatar
 	err    error
 	calls  []service.UploadInput
@@ -40,7 +42,7 @@ func TestUploadHandler(t *testing.T) {
 			CreatedAt: createdAt,
 		},
 	}
-	router := NewRouter(zap.NewNop(), uploader, testMaxUploadSize)
+	router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
 	request := newMultipartUploadRequest(t, "Alice", "avatar.png", []byte("image content"))
 	response := httptest.NewRecorder()
 
@@ -95,7 +97,7 @@ func TestUploadHandler_UserID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			uploader := &fakeAvatarUploader{}
-			router := NewRouter(zap.NewNop(), uploader, testMaxUploadSize)
+			router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
 			request := newMultipartUploadRequest(t, tt.userID, "avatar.png", []byte("image content"))
 			response := httptest.NewRecorder()
 
@@ -165,7 +167,7 @@ func TestUploadHandler_MultipartRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			uploader := &fakeAvatarUploader{}
-			router := NewRouter(zap.NewNop(), uploader, testMaxUploadSize)
+			router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
 			response := httptest.NewRecorder()
 
 			router.ServeHTTP(response, tt.request(t))
@@ -180,7 +182,7 @@ func TestUploadHandler_MultipartRequest(t *testing.T) {
 
 func TestUploadHandler_FileName(t *testing.T) {
 	uploader := &fakeAvatarUploader{}
-	router := NewRouter(zap.NewNop(), uploader, testMaxUploadSize)
+	router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
 	request := newMultipartUploadRequest(t, "Alice", strings.Repeat("a", maxFileNameLen+1), []byte("image content"))
 	response := httptest.NewRecorder()
 
@@ -223,7 +225,7 @@ func TestUploadHandler_FileSize(t *testing.T) {
 					CreatedAt: time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC),
 				},
 			}
-			router := NewRouter(zap.NewNop(), uploader, testMaxUploadSize)
+			router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
 			request := newMultipartUploadRequest(t, "Alice", "avatar.png", make([]byte, tt.size))
 			response := httptest.NewRecorder()
 
@@ -271,7 +273,7 @@ func TestUploadHandler_ServiceError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			uploader := &fakeAvatarUploader{err: tt.uploadErr}
-			router := NewRouter(zap.NewNop(), uploader, testMaxUploadSize)
+			router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
 			request := newMultipartUploadRequest(t, "Alice", "avatar.png", []byte("image content"))
 			response := httptest.NewRecorder()
 
@@ -289,26 +291,6 @@ func (f *fakeAvatarUploader) Upload(_ context.Context, input service.UploadInput
 	}
 
 	return f.avatar, nil
-}
-
-func (f *fakeAvatarUploader) Download(context.Context, service.DownloadInput) (service.DownloadOutput, error) {
-	return service.DownloadOutput{}, model.ErrAvatarNotFound
-}
-
-func (f *fakeAvatarUploader) GetMetadata(context.Context, string) (model.Avatar, error) {
-	return model.Avatar{}, model.ErrAvatarNotFound
-}
-
-func (f *fakeAvatarUploader) ListByUserID(context.Context, string) ([]model.Avatar, error) {
-	return nil, nil
-}
-
-func (*fakeAvatarUploader) DeleteByID(context.Context, string, string) error {
-	return nil
-}
-
-func (*fakeAvatarUploader) DeleteCurrentByUserID(context.Context, string, string) error {
-	return nil
 }
 
 func newMultipartUploadRequest(t *testing.T, userID, fileName string, content []byte) *http.Request {

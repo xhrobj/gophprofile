@@ -50,11 +50,6 @@ func (s *AvatarService) Download(ctx context.Context, input DownloadInput) (Down
 	}, nil
 }
 
-// IsInvalidAvatarSize сообщает, что запрошен неподдерживаемый размер изображения.
-func IsInvalidAvatarSize(err error) bool {
-	return errors.Is(err, ErrInvalidAvatarSize)
-}
-
 func (s *AvatarService) findAvatar(ctx context.Context, input DownloadInput) (model.Avatar, error) {
 	if input.AvatarID != "" {
 		avatar, err := s.repository.GetByID(ctx, input.AvatarID)

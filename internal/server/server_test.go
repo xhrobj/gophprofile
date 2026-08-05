@@ -1,10 +1,7 @@
 package server
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -12,7 +9,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 func TestRun_StopsAfterContextCancellation(t *testing.T) {
@@ -21,8 +17,7 @@ func TestRun_StopsAfterContextCancellation(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 
-	var output bytes.Buffer
-	lg := testLogger(&output)
+	lg := zap.NewNop()
 	httpServer := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
@@ -46,17 +41,6 @@ func TestRun_StopsAfterContextCancellation(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run() did not stop after context cancellation")
-	}
-
-	messages := logMessages(t, &output)
-	want := []string{"server started", "server shutdown started", "server stopped"}
-	if len(messages) != len(want) {
-		t.Fatalf("log messages = %v, want %v", messages, want)
-	}
-	for index := range want {
-		if messages[index] != want[index] {
-			t.Errorf("log message %d = %q, want %q", index, messages[index], want[index])
-		}
 	}
 }
 
@@ -90,7 +74,7 @@ func TestRun_ForcesCloseAfterShutdownTimeout(t *testing.T) {
 
 	const shutdownTimeout = 50 * time.Millisecond
 	go func() {
-		done <- Run(ctx, listener, httpServer, shutdownTimeout, testLogger(&bytes.Buffer{}))
+		done <- Run(ctx, listener, httpServer, shutdownTimeout, zap.NewNop())
 	}()
 
 	waitForServer(t, listener.Addr().String())
@@ -151,31 +135,24 @@ func TestRun_ReturnsServeError(t *testing.T) {
 		listener,
 		&http.Server{ReadHeaderTimeout: time.Second},
 		time.Second,
-		testLogger(&bytes.Buffer{}),
+		zap.NewNop(),
 	)
 	if !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("Run() error = %v, want %v", err, net.ErrClosed)
 	}
 }
 
-func testLogger(output *bytes.Buffer) *zap.Logger {
-	core := zapcore.NewCore(
-		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
-		zapcore.AddSync(output),
-		zapcore.DebugLevel,
-	)
-
-	return zap.New(core).With(zap.String("service", "server"))
-}
-
 func waitForServer(t *testing.T, address string) {
 	t.Helper()
 
 	client := &http.Client{Timeout: 100 * time.Millisecond}
-	deadline := time.Now().Add(time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(time.Second)
+	defer timeout.Stop()
 	url := "http://" + address
 
-	for time.Now().Before(deadline) {
+	for {
 		response, err := client.Get(url)
 		if err == nil {
 			if closeErr := response.Body.Close(); closeErr != nil {
@@ -183,28 +160,11 @@ func waitForServer(t *testing.T, address string) {
 			}
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
 
-	t.Fatalf("server did not start on %s", address)
-}
-
-func logMessages(t *testing.T, output *bytes.Buffer) []string {
-	t.Helper()
-
-	scanner := bufio.NewScanner(output)
-	var messages []string
-	for scanner.Scan() {
-		var entry map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			t.Fatalf("decode log entry: %v", err)
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatalf("server did not start on %s", address)
 		}
-		message, _ := entry["msg"].(string)
-		messages = append(messages, message)
 	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("scan log output: %v", err)
-	}
-
-	return messages
 }

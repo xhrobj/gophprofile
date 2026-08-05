@@ -18,6 +18,7 @@ import (
 	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 	"github.com/xhrobj/gophprofile/internal/config"
 	"github.com/xhrobj/gophprofile/internal/handler"
+	"github.com/xhrobj/gophprofile/internal/health"
 	"github.com/xhrobj/gophprofile/internal/logger"
 	"github.com/xhrobj/gophprofile/internal/migration"
 	"github.com/xhrobj/gophprofile/internal/postgres"
@@ -98,6 +99,7 @@ func run(ctx context.Context) error {
 
 	avatarRepository := postgres.NewAvatarRepository(pool)
 	avatarService := service.NewAvatarService(avatarRepository, storage, publisher, uuid.NewString, s3.OriginalKey)
+	healthChecker := health.NewChecker(pool, storage, publisher)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddress)
 	if err != nil {
@@ -111,7 +113,7 @@ func run(ctx context.Context) error {
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddress,
-		Handler:           handler.NewRouter(lg, avatarService, cfg.MaxUploadSize),
+		Handler:           handler.NewRouter(lg, avatarService, healthChecker, cfg.MaxUploadSize),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 		ErrorLog:          errorLog,

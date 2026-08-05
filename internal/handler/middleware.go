@@ -31,15 +31,6 @@ func RequestIDFromContext(ctx context.Context) string {
 	return requestID
 }
 
-func newRequestID() (string, error) {
-	value := make([]byte, requestIDSize)
-	if _, err := rand.Read(value); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(value), nil
-}
-
 func (w *responseWriter) WriteHeader(status int) {
 	if w.status != 0 {
 		return
@@ -59,6 +50,15 @@ func (w *responseWriter) Write(data []byte) (int, error) {
 
 func (w *responseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
+}
+
+func newRequestID() (string, error) {
+	value := make([]byte, requestIDSize)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(value), nil
 }
 
 func requestIDMiddleware(baseLogger *zap.Logger) func(http.Handler) http.Handler {

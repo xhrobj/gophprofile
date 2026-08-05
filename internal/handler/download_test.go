@@ -16,23 +16,12 @@ import (
 	"github.com/xhrobj/gophprofile/internal/service"
 )
 
-type fakeAvatarAPI struct {
+type fakeAvatarDownloader struct {
+	noopAvatarService
+
 	downloadOutput service.DownloadOutput
 	downloadErr    error
 	downloadCalls  []service.DownloadInput
-
-	metadataAvatar model.Avatar
-	metadataErr    error
-	metadataCalls  []string
-
-	listAvatars []model.Avatar
-	listErr     error
-	listCalls   []string
-
-	deleteByIDErr      error
-	deleteCurrentErr   error
-	deleteByIDCalls    [][2]string
-	deleteCurrentCalls [][2]string
 }
 
 func TestDownloadHandler(t *testing.T) {
@@ -55,11 +44,11 @@ func TestDownloadHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			api := &fakeAvatarAPI{downloadOutput: service.DownloadOutput{
+			api := &fakeAvatarDownloader{downloadOutput: service.DownloadOutput{
 				Content:     io.NopCloser(bytes.NewReader([]byte("image"))),
 				ContentType: "image/jpeg",
 			}}
-			router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 
@@ -92,8 +81,8 @@ func TestDownloadHandler_InvalidPathParameters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			api := &fakeAvatarAPI{}
-			router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+			api := &fakeAvatarDownloader{}
+			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 
@@ -121,8 +110,8 @@ func TestDownloadHandler_Error(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			api := &fakeAvatarAPI{downloadErr: tt.err}
-			router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+			api := &fakeAvatarDownloader{downloadErr: tt.err}
+			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/avatars/"+testAvatarID, nil)
 			response := httptest.NewRecorder()
 
@@ -133,31 +122,7 @@ func TestDownloadHandler_Error(t *testing.T) {
 	}
 }
 
-func (f *fakeAvatarAPI) Upload(context.Context, service.UploadInput) (model.Avatar, error) {
-	return model.Avatar{}, nil
-}
-
-func (f *fakeAvatarAPI) Download(_ context.Context, input service.DownloadInput) (service.DownloadOutput, error) {
+func (f *fakeAvatarDownloader) Download(_ context.Context, input service.DownloadInput) (service.DownloadOutput, error) {
 	f.downloadCalls = append(f.downloadCalls, input)
 	return f.downloadOutput, f.downloadErr
-}
-
-func (f *fakeAvatarAPI) GetMetadata(_ context.Context, avatarID string) (model.Avatar, error) {
-	f.metadataCalls = append(f.metadataCalls, avatarID)
-	return f.metadataAvatar, f.metadataErr
-}
-
-func (f *fakeAvatarAPI) ListByUserID(_ context.Context, userID string) ([]model.Avatar, error) {
-	f.listCalls = append(f.listCalls, userID)
-	return f.listAvatars, f.listErr
-}
-
-func (f *fakeAvatarAPI) DeleteByID(_ context.Context, avatarID, requesterUserID string) error {
-	f.deleteByIDCalls = append(f.deleteByIDCalls, [2]string{avatarID, requesterUserID})
-	return f.deleteByIDErr
-}
-
-func (f *fakeAvatarAPI) DeleteCurrentByUserID(_ context.Context, userID, requesterUserID string) error {
-	f.deleteCurrentCalls = append(f.deleteCurrentCalls, [2]string{userID, requesterUserID})
-	return f.deleteCurrentErr
 }

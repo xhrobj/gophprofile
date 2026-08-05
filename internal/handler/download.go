@@ -60,7 +60,7 @@ func (h *downloadHandler) serve(w http.ResponseWriter, r *http.Request, input se
 	output, err := h.service.Download(r.Context(), input)
 	if err != nil {
 		switch {
-		case service.IsInvalidAvatarSize(err):
+		case errors.Is(err, service.ErrInvalidAvatarSize):
 			writeError(w, r, http.StatusBadRequest, "invalid_size", "supported sizes: original, 100x100, 300x300", 0)
 		case errors.Is(err, model.ErrAvatarNotFound):
 			writeError(w, r, http.StatusNotFound, "avatar_not_found", "avatar not found", 0)

@@ -89,6 +89,22 @@ func (p *Publisher) PublishAvatarDeleted(ctx context.Context, avatar model.Avata
 	return p.publish(ctx, event.AvatarDeletedRoutingKey, message.MessageID, message.CreatedAt, message)
 }
 
+// Ping проверяет, что RabbitMQ connection и channel Publisher остаются открытыми.
+func (p *Publisher) Ping(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if p.connection == nil || p.connection.IsClosed() {
+		return errors.New("rabbitmq connection is closed")
+	}
+	if p.channel == nil || p.channel.IsClosed() {
+		return errors.New("rabbitmq channel is closed")
+	}
+
+	return nil
+}
+
 // Close закрывает RabbitMQ channel и connection Publisher.
 func (p *Publisher) Close() error {
 	p.mu.Lock()

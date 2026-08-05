@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -36,7 +37,7 @@ func TestRouter_RequestID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var output bytes.Buffer
-			router := NewRouter(testLogger(&output), noopAvatarService{}, 10<<20)
+			router := NewRouter(testLogger(&output), noopAvatarService{}, noopHealthChecker{}, 10<<20)
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
 			if tt.incomingRequestID != "" {
 				request.Header.Set(requestIDHeader, tt.incomingRequestID)
@@ -78,9 +79,41 @@ func TestRouter_RequestID(t *testing.T) {
 	}
 }
 
+func TestRouter_Web(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "root", path: "/"},
+		{name: "upload page", path: "/web/upload"},
+		{name: "gallery page", path: "/web/gallery/Alice"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := NewRouter(zap.NewNop(), noopAvatarService{}, noopHealthChecker{}, 10<<20)
+			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			response := httptest.NewRecorder()
+
+			router.ServeHTTP(response, request)
+
+			if response.Code != http.StatusOK {
+				t.Errorf("response status = %d, want %d", response.Code, http.StatusOK)
+			}
+			if got := response.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+				t.Errorf("Content-Type = %q, want %q", got, "text/html; charset=utf-8")
+			}
+			body := response.Body.String()
+			if !strings.Contains(body, "GophProfile") || !strings.Contains(body, `id="uploadForm"`) {
+				t.Error("response does not contain GophProfile page")
+			}
+		})
+	}
+}
+
 func TestRouter_LogsNotFoundStatus(t *testing.T) {
 	var output bytes.Buffer
-	router := NewRouter(testLogger(&output), noopAvatarService{}, 10<<20)
+	router := NewRouter(testLogger(&output), noopAvatarService{}, noopHealthChecker{}, 10<<20)
 	request := httptest.NewRequest(http.MethodGet, "/missing", nil)
 	response := httptest.NewRecorder()
 

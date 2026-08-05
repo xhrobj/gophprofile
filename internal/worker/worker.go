@@ -390,14 +390,14 @@ func (w *Worker) finalizeFailure(lg *zap.Logger, message event.AvatarUploaded) {
 		message.AvatarID,
 		model.ProcessingStatusFailed,
 	); err != nil {
-		lg.Error("failed to mark avatar processing as failed; message will remain in DLQ", zap.Error(err))
+		lg.Error("failed to mark avatar processing as failed", zap.Error(err))
 	}
 	cancelStatus()
 
 	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), recoveryTimeout)
 	defer cancelCleanup()
 
-	if err := w.storage.Delete(cleanupCtx, thumbnailKeys(message)...); err != nil {
+	if err := w.deleteKeysWithRetry(cleanupCtx, lg, thumbnailKeys(message)...); err != nil {
 		lg.Warn("failed to clean up thumbnails after processing error", zap.Error(err))
 	}
 }

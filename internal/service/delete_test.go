@@ -182,7 +182,7 @@ func TestAvatarService_DeleteCurrentByUserID(t *testing.T) {
 	}
 }
 
-func TestAvatarService_DeleteByID_RollbackUsesIndependentContext(t *testing.T) {
+func TestAvatarService_DeleteByID_RestoresAfterRequestCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	repository := &deleteRepository{avatar: model.Avatar{ID: avatarID42, UserID: "Alice"}}
 	publisher := &deletePublisher{

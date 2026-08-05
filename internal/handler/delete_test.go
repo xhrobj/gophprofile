@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,15 @@ import (
 	"github.com/xhrobj/gophprofile/internal/model"
 	"github.com/xhrobj/gophprofile/internal/service"
 )
+
+type fakeAvatarDeleter struct {
+	noopAvatarService
+
+	deleteByIDErr      error
+	deleteCurrentErr   error
+	deleteByIDCalls    [][2]string
+	deleteCurrentCalls [][2]string
+}
 
 var errDeleteAvatar = errors.New("delete avatar")
 
@@ -36,8 +46,8 @@ func TestDeleteHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			api := &fakeAvatarAPI{}
-			router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+			api := &fakeAvatarDeleter{}
+			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 			request := httptest.NewRequest(http.MethodDelete, tt.path, nil)
 			request.Header.Set(userIDHeader, "Alice")
 			response := httptest.NewRecorder()
@@ -78,8 +88,8 @@ func TestDeleteHandler_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			api := &fakeAvatarAPI{}
-			router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+			api := &fakeAvatarDeleter{}
+			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 			request := httptest.NewRequest(http.MethodDelete, tt.path, nil)
 			if tt.userID != "" {
 				request.Header.Set(userIDHeader, tt.userID)
@@ -111,8 +121,8 @@ func TestDeleteHandler_Error(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			api := &fakeAvatarAPI{deleteByIDErr: tt.err}
-			router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+			api := &fakeAvatarDeleter{deleteByIDErr: tt.err}
+			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 			request := httptest.NewRequest(http.MethodDelete, "/api/v1/avatars/"+testAvatarID, nil)
 			request.Header.Set(userIDHeader, "Alice")
 			response := httptest.NewRecorder()
@@ -122,4 +132,14 @@ func TestDeleteHandler_Error(t *testing.T) {
 			assertErrorResponse(t, response, tt.wantStatus, tt.wantCode, 0)
 		})
 	}
+}
+
+func (f *fakeAvatarDeleter) DeleteByID(_ context.Context, avatarID, requesterUserID string) error {
+	f.deleteByIDCalls = append(f.deleteByIDCalls, [2]string{avatarID, requesterUserID})
+	return f.deleteByIDErr
+}
+
+func (f *fakeAvatarDeleter) DeleteCurrentByUserID(_ context.Context, userID, requesterUserID string) error {
+	f.deleteCurrentCalls = append(f.deleteCurrentCalls, [2]string{userID, requesterUserID})
+	return f.deleteCurrentErr
 }

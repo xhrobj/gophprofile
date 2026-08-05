@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,10 +14,22 @@ import (
 	"github.com/xhrobj/gophprofile/internal/model"
 )
 
+type fakeAvatarMetadataReader struct {
+	noopAvatarService
+
+	metadataAvatar model.Avatar
+	metadataErr    error
+	metadataCalls  []string
+
+	listAvatars []model.Avatar
+	listErr     error
+	listCalls   []string
+}
+
 func TestMetadataHandler_GetByID(t *testing.T) {
 	createdAt := time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC)
 	updatedAt := createdAt.Add(time.Minute)
-	api := &fakeAvatarAPI{metadataAvatar: model.Avatar{
+	api := &fakeAvatarMetadataReader{metadataAvatar: model.Avatar{
 		ID:        testAvatarID,
 		UserID:    "Alice",
 		FileName:  "avatar.png",
@@ -33,7 +46,7 @@ func TestMetadataHandler_GetByID(t *testing.T) {
 		CreatedAt:        createdAt,
 		UpdatedAt:        updatedAt,
 	}}
-	router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+	router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/avatars/"+testAvatarID+"/metadata", nil)
 	response := httptest.NewRecorder()
 
@@ -78,8 +91,8 @@ func TestMetadataHandler_GetByID(t *testing.T) {
 }
 
 func TestMetadataHandler_GetByID_WithoutThumbnails(t *testing.T) {
-	api := &fakeAvatarAPI{metadataAvatar: model.Avatar{ID: testAvatarID}}
-	router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+	api := &fakeAvatarMetadataReader{metadataAvatar: model.Avatar{ID: testAvatarID}}
+	router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/avatars/"+testAvatarID+"/metadata", nil)
 	response := httptest.NewRecorder()
 
@@ -97,7 +110,7 @@ func TestMetadataHandler_GetByID_WithoutThumbnails(t *testing.T) {
 
 func TestMetadataHandler_ListByUserID(t *testing.T) {
 	createdAt := time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC)
-	api := &fakeAvatarAPI{listAvatars: []model.Avatar{
+	api := &fakeAvatarMetadataReader{listAvatars: []model.Avatar{
 		{
 			ID:               testAvatarID,
 			UserID:           "Alice",
@@ -120,7 +133,7 @@ func TestMetadataHandler_ListByUserID(t *testing.T) {
 			CreatedAt:        createdAt.Add(-2 * time.Minute),
 		},
 	}}
-	router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+	router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/Alice/avatars", nil)
 	response := httptest.NewRecorder()
 
@@ -149,8 +162,8 @@ func TestMetadataHandler_ListByUserID(t *testing.T) {
 }
 
 func TestMetadataHandler_ListByUserID_Empty(t *testing.T) {
-	api := &fakeAvatarAPI{}
-	router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+	api := &fakeAvatarMetadataReader{}
+	router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/Eve/avatars", nil)
 	response := httptest.NewRecorder()
 
@@ -180,8 +193,8 @@ func TestMetadataHandler_InvalidPathParameters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			api := &fakeAvatarAPI{}
-			router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+			api := &fakeAvatarMetadataReader{}
+			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 
@@ -214,8 +227,8 @@ func TestMetadataHandler_Error(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			api := &fakeAvatarAPI{metadataErr: tt.metadataErr, listErr: tt.listErr}
-			router := NewRouter(zap.NewNop(), api, testMaxUploadSize)
+			api := &fakeAvatarMetadataReader{metadataErr: tt.metadataErr, listErr: tt.listErr}
+			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 
@@ -224,4 +237,14 @@ func TestMetadataHandler_Error(t *testing.T) {
 			assertErrorResponse(t, response, tt.wantStatus, tt.wantCode, 0)
 		})
 	}
+}
+
+func (f *fakeAvatarMetadataReader) GetMetadata(_ context.Context, avatarID string) (model.Avatar, error) {
+	f.metadataCalls = append(f.metadataCalls, avatarID)
+	return f.metadataAvatar, f.metadataErr
+}
+
+func (f *fakeAvatarMetadataReader) ListByUserID(_ context.Context, userID string) ([]model.Avatar, error) {
+	f.listCalls = append(f.listCalls, userID)
+	return f.listAvatars, f.listErr
 }
