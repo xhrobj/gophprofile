@@ -1,17 +1,19 @@
 .PHONY: \
 	show-coverage \
 	build build-server build-worker \
-	s3-up \
 	db-up db-connect \
+	s3-up \
 	rabbitmq-up \
 	infra-up infra-down infra-erase \
 	run-server run-worker \
-	test-all test test-race test-integration \
+	compose-up compose-down compose-logs \
+	test-all test test-race test-integration test-e2e \
 	coverage \
 	vet lint ci \
 	clean
 
 # файл с переменными окружения для запуска через Makefile
+# NOTE: создать локальный env-файл: `cp .env.example .env`
 ENV_FILE ?= .env
 
 -include $(ENV_FILE)
@@ -19,18 +21,12 @@ ENV_FILE ?= .env
 # строка подключения приложения к локальному PostgreSQL
 DATABASE_DSN ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 
+export POSTGRES_DB POSTGRES_PASSWORD POSTGRES_PORT POSTGRES_USER
 export DATABASE_DSN
 export S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET S3_USE_SSL
-export RABBITMQ_URL RABBITMQ_EXCHANGE RABBITMQ_QUEUE
+export RABBITMQ_USER RABBITMQ_PASSWORD RABBITMQ_URL RABBITMQ_EXCHANGE RABBITMQ_QUEUE
 export LOG_LEVEL
 export HTTP_ADDRESS MAX_UPLOAD_SIZE SHUTDOWN_TIMEOUT
-
-# команда Docker Compose с выбранным env-файлом
-# !!!: для целей s3-up, db-*, rabbitmq-up, infra-*, run-*, test-integration, coverage и ci
-# требуется env-файл с переменными POSTGRES_*, S3_* и RABBITMQ_*
-#
-# NOTE: создать локальный env-файл: `cp .env.example .env`
-COMPOSE := docker compose --env-file $(ENV_FILE)
 
 # каталоги для артефактов сборки и пути к бинарникам
 BIN_DIR := bin
@@ -55,35 +51,32 @@ build-worker:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(WORKER) ./cmd/worker
 
-# создать (при необходимости) и запустить локальный MinIO
-# и дождаться его готовности
-s3-up:
-	$(COMPOSE) up -d --wait minio
-
-# создать (при необходимости) и запустить локальный PostgreSQL
-# и дождаться его готовности
+# создать (при необходимости) и запустить локальный PostgreSQL и дождаться его готовности
 db-up:
-	$(COMPOSE) up -d --wait postgres
+	docker compose up -d --wait postgres
 
 # подключиться к PostgreSQL через psql
 db-connect:
-	$(COMPOSE) exec postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+	docker compose exec postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
 
-# создать (при необходимости) и запустить локальный RabbitMQ
-# и дождаться его готовности
+# создать (при необходимости) и запустить локальный MinIO и дождаться его готовности
+s3-up:
+	docker compose up -d --wait minio
+
+# создать (при необходимости) и запустить локальный RabbitMQ и дождаться его готовности
 rabbitmq-up:
-	$(COMPOSE) up -d --wait rabbitmq
+	docker compose up -d --wait rabbitmq
 
-# запустить локальную инфраструктуру
-infra-up: s3-up db-up rabbitmq-up
+# запустить локальную инфраструктуру и дождаться ее готовности
+infra-up: db-up s3-up rabbitmq-up
 
-# остановить и удалить контейнеры локальной инфраструктуры без удаления данных
+# остановить контейнеры локальной инфраструктуры
 infra-down:
-	$(COMPOSE) down
+	docker compose stop postgres minio rabbitmq
 
-# удалить контейнеры локальной инфраструктуры и локальные данные
+# удалить контейнеры, сети и локальные данные Docker Compose
 infra-erase:
-	$(COMPOSE) down -v
+	docker compose down -v
 
 # собрать и запустить Сервер
 run-server: infra-up build-server
@@ -92,6 +85,19 @@ run-server: infra-up build-server
 # собрать и запустить Воркер
 run-worker: infra-up build-worker
 	$(WORKER)
+
+# собрать и запустить полный локальный стек приложения:
+# MinIO (S3), PostgreSQL, RabbitMQ, Сервер и Воркер через Docker Compose
+compose-up:
+	docker compose up -d --build --wait
+
+# остановить и удалить контейнеры и сети Docker Compose без удаления данных
+compose-down:
+	docker compose down
+
+# показать логи сервисов Docker Compose
+compose-logs:
+	docker compose logs -f
 
 # запустить обычные и интеграционные тесты
 test-all: test-race test-integration
@@ -107,6 +113,10 @@ test-race:
 # запустить интеграционные тесты с локальными PostgreSQL, MinIO и RabbitMQ
 test-integration: infra-up
 	go test -tags=integration -count=1 ./...
+
+# запустить end-to-end happy path через публичный HTTP API полного Compose-стека
+test-e2e: compose-up
+	E2E_BASE_URL=http://127.0.0.1:8080 go test -tags=e2e -count=1 ./tests/e2e
 
 # запустить обычные и интеграционные тесты
 # и сохранить атомарный профиль покрытия всего проекта
@@ -127,7 +137,7 @@ vet:
 lint:
 	golangci-lint run ./...
 
-# собрать проект и выполнить полный набор CI-проверок
+# собрать проект и выполнить полный (без e2e) набор CI-проверок
 ci: build test-all vet lint
 
 # удалить артефакты сборки и профиль покрытия
