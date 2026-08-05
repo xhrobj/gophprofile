@@ -82,7 +82,7 @@ func TestDeleteHandler_Validation(t *testing.T) {
 	}{
 		{name: "invalid avatar ID", path: "/api/v1/avatars/not-a-uuid", userID: "Alice"},
 		{name: "missing requester", path: "/api/v1/avatars/" + testAvatarID},
-		{name: "invalid path user ID", path: "/api/v1/users/" + strings.Repeat("a", maxUserIDLen+1) + "/avatar", userID: "Alice"},
+		{name: "invalid path user ID", path: "/api/v1/users/" + strings.Repeat("a", maxUserIDBytes+1) + "/avatar", userID: "Alice"},
 		{name: "blank requester", path: "/api/v1/users/Alice/avatar", userID: "   "},
 	}
 

@@ -90,7 +90,8 @@ func TestUploadHandler_UserID(t *testing.T) {
 	}{
 		{name: "missing header"},
 		{name: "blank header", userID: "   "},
-		{name: "too long header", userID: strings.Repeat("a", maxUserIDLen+1)},
+		{name: "too long header", userID: strings.Repeat("a", maxUserIDBytes+1)},
+		{name: "multibyte header over byte limit", userID: strings.Repeat("я", maxUserIDBytes/2+1)},
 		{name: "control character", userID: "Alice\x00"},
 	}
 
@@ -181,16 +182,28 @@ func TestUploadHandler_MultipartRequest(t *testing.T) {
 }
 
 func TestUploadHandler_FileName(t *testing.T) {
-	uploader := &fakeAvatarUploader{}
-	router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
-	request := newMultipartUploadRequest(t, "Alice", strings.Repeat("a", maxFileNameLen+1), []byte("image content"))
-	response := httptest.NewRecorder()
+	tests := []struct {
+		name     string
+		fileName string
+	}{
+		{name: "too long file name", fileName: strings.Repeat("a", maxFileNameBytes+1)},
+		{name: "multibyte file name over byte limit", fileName: strings.Repeat("я", maxFileNameBytes/2+1)},
+	}
 
-	router.ServeHTTP(response, request)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uploader := &fakeAvatarUploader{}
+			router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
+			request := newMultipartUploadRequest(t, "Alice", tt.fileName, []byte("image content"))
+			response := httptest.NewRecorder()
 
-	assertErrorResponse(t, response, http.StatusBadRequest, "invalid_request", 0)
-	if len(uploader.calls) != 0 {
-		t.Errorf("Upload() calls = %d, want 0", len(uploader.calls))
+			router.ServeHTTP(response, request)
+
+			assertErrorResponse(t, response, http.StatusBadRequest, "invalid_request", 0)
+			if len(uploader.calls) != 0 {
+				t.Errorf("Upload() calls = %d, want 0", len(uploader.calls))
+			}
+		})
 	}
 }
 

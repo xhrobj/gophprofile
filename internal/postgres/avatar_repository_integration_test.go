@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,9 +17,11 @@ import (
 )
 
 const (
-	avatarID42 = "c0decafe-babe-4bed-b042-feeddeadbeef"
-	avatarID69 = "c0decafe-babe-4bed-b069-feeddeadbeef"
-	avatarID99 = "c0decafe-babe-4bed-b099-feeddeadbeef"
+	avatarID42  = "c0decafe-babe-4bed-b042-feeddeadbeef"
+	avatarID69  = "c0decafe-babe-4bed-b069-feeddeadbeef"
+	avatarID99  = "c0decafe-babe-4bed-b099-feeddeadbeef"
+	messageID47 = "c0decafe-babe-4bed-b047-feeddeadbeef"
+	messageID77 = "c0decafe-babe-4bed-b077-feeddeadbeef"
 )
 
 func TestIntegration_PostgreSQLAvatarRepository_CreateReadAndList(t *testing.T) {
@@ -100,6 +103,28 @@ func TestIntegration_PostgreSQLAvatarRepository_CreateReadAndList(t *testing.T) 
 	}
 }
 
+func TestIntegration_PostgreSQLAvatarRepository_CreateAcceptsLongS3Key(t *testing.T) {
+	ctx, pool := openMigratedTestDatabase(t)
+	repository := postgres.NewAvatarRepository(pool)
+
+	avatar := newAvatar(
+		avatarID42,
+		strings.Repeat("u", 255),
+		strings.Repeat("f", 255),
+	)
+	if len(avatar.S3Key) <= 500 {
+		t.Fatalf("test S3 key length = %d, want > 500", len(avatar.S3Key))
+	}
+
+	created, err := repository.Create(ctx, avatar)
+	if err != nil {
+		t.Fatalf("Create() long S3 key error = %v", err)
+	}
+	if created.S3Key != avatar.S3Key {
+		t.Errorf("Create() S3Key length = %d, want %d", len(created.S3Key), len(avatar.S3Key))
+	}
+}
+
 func TestIntegration_PostgreSQLAvatarRepository_Processing(t *testing.T) {
 	ctx, pool := openMigratedTestDatabase(t)
 	repository := postgres.NewAvatarRepository(pool)
@@ -109,7 +134,7 @@ func TestIntegration_PostgreSQLAvatarRepository_Processing(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	claimed, err := repository.ClaimForProcessing(ctx, avatar.ID)
+	claimed, err := repository.ClaimForProcessing(ctx, avatar.ID, messageID47, false)
 	if err != nil {
 		t.Fatalf("ClaimForProcessing() uploading avatar error = %v", err)
 	}
@@ -121,19 +146,35 @@ func TestIntegration_PostgreSQLAvatarRepository_Processing(t *testing.T) {
 		t.Fatalf("UpdateUploadStatus() error = %v", err)
 	}
 
-	claimed, err = repository.ClaimForProcessing(ctx, avatar.ID)
+	claimed, err = repository.ClaimForProcessing(ctx, avatar.ID, messageID47, false)
 	if err != nil {
 		t.Fatalf("first ClaimForProcessing() error = %v", err)
 	}
 	if !claimed {
 		t.Error("first ClaimForProcessing() = false, want true")
 	}
-	claimed, err = repository.ClaimForProcessing(ctx, avatar.ID)
+	claimed, err = repository.ClaimForProcessing(ctx, avatar.ID, messageID47, false)
 	if err != nil {
-		t.Fatalf("second ClaimForProcessing() error = %v", err)
+		t.Fatalf("ClaimForProcessing() duplicate error = %v", err)
 	}
 	if claimed {
-		t.Error("second ClaimForProcessing() = true, want false")
+		t.Error("ClaimForProcessing() duplicate = true, want false")
+	}
+
+	claimed, err = repository.ClaimForProcessing(ctx, avatar.ID, messageID77, true)
+	if err != nil {
+		t.Fatalf("ClaimForProcessing() different message error = %v", err)
+	}
+	if claimed {
+		t.Error("ClaimForProcessing() different message = true, want false")
+	}
+
+	claimed, err = repository.ClaimForProcessing(ctx, avatar.ID, messageID47, true)
+	if err != nil {
+		t.Fatalf("ClaimForProcessing() redelivery error = %v", err)
+	}
+	if !claimed {
+		t.Error("ClaimForProcessing() redelivery = false, want true")
 	}
 
 	thumbnailKeys := map[model.ThumbnailSize]string{
@@ -158,6 +199,14 @@ func TestIntegration_PostgreSQLAvatarRepository_Processing(t *testing.T) {
 		t.Errorf("ThumbnailS3Keys = %#v, want %#v", stored.ThumbnailS3Keys, thumbnailKeys)
 	}
 
+	claimed, err = repository.ClaimForProcessing(ctx, avatar.ID, messageID47, false)
+	if err != nil {
+		t.Fatalf("ClaimForProcessing() completed avatar error = %v", err)
+	}
+	if claimed {
+		t.Error("ClaimForProcessing() completed avatar = true, want false")
+	}
+
 	failedAvatar, err := repository.Create(ctx, newAvatar(avatarID69, "alice", "failed.jpg"))
 	if err != nil {
 		t.Fatalf("Create() failed avatar error = %v", err)
@@ -165,7 +214,7 @@ func TestIntegration_PostgreSQLAvatarRepository_Processing(t *testing.T) {
 	if err := repository.UpdateUploadStatus(ctx, failedAvatar.ID, model.UploadStatusCompleted); err != nil {
 		t.Fatalf("UpdateUploadStatus() failed avatar error = %v", err)
 	}
-	claimed, err = repository.ClaimForProcessing(ctx, failedAvatar.ID)
+	claimed, err = repository.ClaimForProcessing(ctx, failedAvatar.ID, messageID47, false)
 	if err != nil {
 		t.Fatalf("ClaimForProcessing() failed avatar error = %v", err)
 	}
@@ -253,7 +302,7 @@ func TestIntegration_PostgreSQLAvatarRepository_SoftDelete(t *testing.T) {
 		t.Errorf("CompleteProcessing() deleted avatar error = %v, want ErrAvatarNotFound", err)
 	}
 
-	claimed, err := repository.ClaimForProcessing(ctx, avatar.ID)
+	claimed, err := repository.ClaimForProcessing(ctx, avatar.ID, messageID47, false)
 	if err != nil {
 		t.Fatalf("ClaimForProcessing() deleted avatar error = %v", err)
 	}

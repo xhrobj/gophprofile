@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
 
 const (
-	maxUserIDLen   = 255
-	maxFileNameLen = 255
+	maxUserIDBytes   = 255
+	maxFileNameBytes = 255
 )
 
 func validateAvatarID(value string) error {
@@ -28,8 +27,8 @@ func validateUserID(value, field string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("%s is required", field)
 	}
-	if utf8.RuneCountInString(value) > maxUserIDLen {
-		return "", fmt.Errorf("%s must not exceed %d characters", field, maxUserIDLen)
+	if len(value) > maxUserIDBytes {
+		return "", fmt.Errorf("%s must not exceed %d bytes", field, maxUserIDBytes)
 	}
 	for _, symbol := range value {
 		if unicode.IsControl(symbol) {
@@ -41,8 +40,8 @@ func validateUserID(value, field string) (string, error) {
 }
 
 func validateFileName(value string) error {
-	if utf8.RuneCountInString(value) > maxFileNameLen {
-		return fmt.Errorf("file name must not exceed %d characters", maxFileNameLen)
+	if len(value) > maxFileNameBytes {
+		return fmt.Errorf("file name must not exceed %d bytes", maxFileNameBytes)
 	}
 
 	return nil

@@ -8,11 +8,12 @@ CREATE TABLE avatars (
     width INTEGER NOT NULL,
     height INTEGER NOT NULL,
 
-    s3_key VARCHAR(500) NOT NULL,
+    s3_key VARCHAR(1024) NOT NULL,
     thumbnail_s3_keys JSONB,
 
     upload_status VARCHAR(50) NOT NULL DEFAULT 'uploading',
     processing_status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    processing_message_id UUID,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

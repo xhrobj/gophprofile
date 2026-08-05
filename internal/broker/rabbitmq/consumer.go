@@ -109,6 +109,10 @@ func (d delivery) RoutingKey() string {
 	return d.value.RoutingKey
 }
 
+func (d delivery) Redelivered() bool {
+	return d.value.Redelivered
+}
+
 func (d delivery) Ack() error {
 	return d.value.Ack(false)
 }

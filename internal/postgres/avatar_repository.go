@@ -167,7 +167,7 @@ func (r *AvatarRepository) UpdateProcessingStatus(
 	return r.updateStatus(
 		ctx,
 		`UPDATE avatars
-		SET processing_status = $2, updated_at = CURRENT_TIMESTAMP
+		SET processing_status = $2, processing_message_id = NULL, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1 AND deleted_at IS NULL`,
 		avatarID,
 		string(status),
@@ -191,6 +191,7 @@ func (r *AvatarRepository) CompleteProcessing(
 		`UPDATE avatars
 		SET thumbnail_s3_keys = $2,
 			processing_status = 'completed',
+			processing_message_id = NULL,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1 AND deleted_at IS NULL`,
 		avatarID,
@@ -262,17 +263,27 @@ func (r *AvatarRepository) RestoreDeleted(ctx context.Context, avatarID string) 
 	return nil
 }
 
-// ClaimForProcessing атомарно переводит готовую к обработке аватарку из pending в processing.
-func (r *AvatarRepository) ClaimForProcessing(ctx context.Context, avatarID string) (bool, error) {
+// ClaimForProcessing атомарно захватывает аватарку для обработки сообщения.
+// Redelivery того же messageID может продолжить processing после аварийного завершения Worker.
+func (r *AvatarRepository) ClaimForProcessing(ctx context.Context, avatarID, messageID string, redelivered bool) (bool, error) {
 	commandTag, err := r.pool.Exec(
 		ctx,
 		`UPDATE avatars
-		SET processing_status = 'processing', updated_at = CURRENT_TIMESTAMP
+		SET processing_status = 'processing', processing_message_id = $2, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1
 			AND deleted_at IS NULL
 			AND upload_status = 'completed'
-			AND processing_status = 'pending'`,
+			AND (
+				processing_status = 'pending'
+				OR (
+					$3
+					AND processing_status = 'processing'
+					AND processing_message_id = $2
+				)
+			)`,
 		avatarID,
+		messageID,
+		redelivered,
 	)
 	if err != nil {
 		return false, fmt.Errorf("claim avatar for processing: %w", err)

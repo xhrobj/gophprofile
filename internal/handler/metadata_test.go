@@ -188,7 +188,7 @@ func TestMetadataHandler_InvalidPathParameters(t *testing.T) {
 		path string
 	}{
 		{name: "invalid avatar ID", path: "/api/v1/avatars/not-a-uuid/metadata"},
-		{name: "too long user ID", path: "/api/v1/users/" + strings.Repeat("a", maxUserIDLen+1) + "/avatars"},
+		{name: "too long user ID", path: "/api/v1/users/" + strings.Repeat("a", maxUserIDBytes+1) + "/avatars"},
 	}
 
 	for _, tt := range tests {

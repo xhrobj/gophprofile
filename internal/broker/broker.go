@@ -1,4 +1,4 @@
-// Package broker содержит broker-neutral контракты доставки сообщений.
+// Package broker содержит общие контракты для работы с брокером сообщений.
 package broker
 
 import "context"
@@ -8,6 +8,7 @@ type Delivery interface {
 	Body() []byte
 	MessageID() string
 	RoutingKey() string
+	Redelivered() bool
 	Ack() error
 	Nack(requeue bool) error
 }

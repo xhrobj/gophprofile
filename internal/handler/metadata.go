@@ -23,6 +23,16 @@ type metadataHandler struct {
 	logger  *zap.Logger
 }
 
+type dimensionsResponse struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+type thumbnailResponse struct {
+	Size string `json:"size"`
+	URL  string `json:"url"`
+}
+
 type avatarMetadataResponse struct {
 	ID     string `json:"id"`
 	UserID string `json:"user_id"`
@@ -38,16 +48,6 @@ type avatarMetadataResponse struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type dimensionsResponse struct {
-	Width  int `json:"width"`
-	Height int `json:"height"`
-}
-
-type thumbnailResponse struct {
-	Size string `json:"size"`
-	URL  string `json:"url"`
 }
 
 type avatarListResponse struct {

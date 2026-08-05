@@ -30,7 +30,7 @@ const (
 
 // Repository хранит состояние фоновой обработки аватаров.
 type Repository interface {
-	ClaimForProcessing(ctx context.Context, avatarID string) (bool, error)
+	ClaimForProcessing(ctx context.Context, avatarID, messageID string, redelivered bool) (bool, error)
 	CompleteProcessing(ctx context.Context, avatarID string, thumbnailS3Keys map[model.ThumbnailSize]string) error
 	UpdateProcessingStatus(ctx context.Context, avatarID string, status model.ProcessingStatus) error
 }
@@ -132,7 +132,7 @@ func (w *Worker) handleAvatarUploadedDelivery(ctx context.Context, item broker.D
 		zap.String("user_id", message.UserID),
 	)
 
-	claimed, err := w.claimWithRetry(ctx, messageLogger, message.AvatarID)
+	claimed, err := w.claimWithRetry(ctx, messageLogger, message.AvatarID, message.MessageID, item.Redelivered())
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil
@@ -249,7 +249,12 @@ func (w *Worker) rejectInvalidMessage(item broker.Delivery, err error) error {
 	return nil
 }
 
-func (w *Worker) claimWithRetry(ctx context.Context, lg *zap.Logger, avatarID string) (bool, error) {
+func (w *Worker) claimWithRetry(
+	ctx context.Context,
+	lg *zap.Logger,
+	avatarID, messageID string,
+	redelivered bool,
+) (bool, error) {
 	var claimed bool
 	var resultErr error
 
@@ -258,7 +263,7 @@ func (w *Worker) claimWithRetry(ctx context.Context, lg *zap.Logger, avatarID st
 			return false, ctx.Err()
 		}
 
-		claimed, resultErr = w.repository.ClaimForProcessing(ctx, avatarID)
+		claimed, resultErr = w.repository.ClaimForProcessing(ctx, avatarID, messageID, redelivered)
 		if resultErr == nil {
 			return claimed, nil
 		}

@@ -27,11 +27,12 @@ const (
 type fakeConsumer struct{}
 
 type fakeDelivery struct {
-	body       []byte
-	messageID  string
-	routingKey string
-	ackCalls   int
-	nackCalls  []bool
+	body        []byte
+	messageID   string
+	routingKey  string
+	redelivered bool
+	ackCalls    int
+	nackCalls   []bool
 }
 
 type claimResult struct {
@@ -42,6 +43,8 @@ type claimResult struct {
 type fakeRepository struct {
 	claimResults       []claimResult
 	claimCalls         int
+	claimMessageIDs    []string
+	claimRedeliveries  []bool
 	completeCalls      int
 	completedKeys      map[model.ThumbnailSize]string
 	completeErr        error
@@ -103,6 +106,7 @@ func TestWorker_HandleDelivery_ProcessesAvatar(t *testing.T) {
 	processor := &fakeImageProcessor{thumbnails: testThumbnails()}
 	message := testEvent()
 	item := newFakeUploadedDelivery(t, message)
+	item.redelivered = true
 	avatarWorker := newTestWorker(repository, storage, processor)
 
 	if err := avatarWorker.handleDelivery(context.Background(), item); err != nil {
@@ -114,6 +118,12 @@ func TestWorker_HandleDelivery_ProcessesAvatar(t *testing.T) {
 	}
 	if repository.claimCalls != 1 {
 		t.Errorf("ClaimForProcessing() calls = %d, want 1", repository.claimCalls)
+	}
+	if !reflect.DeepEqual(repository.claimMessageIDs, []string{message.MessageID}) {
+		t.Errorf("ClaimForProcessing() message IDs = %v, want [%s]", repository.claimMessageIDs, message.MessageID)
+	}
+	if !reflect.DeepEqual(repository.claimRedeliveries, []bool{true}) {
+		t.Errorf("ClaimForProcessing() redeliveries = %v, want [true]", repository.claimRedeliveries)
 	}
 	if storage.getCalls != 1 || storage.getKeys[0] != message.S3Key {
 		t.Errorf("Storage.Get() calls/keys = %d/%v, want 1/%q", storage.getCalls, storage.getKeys, message.S3Key)
@@ -642,6 +652,10 @@ func (f *fakeDelivery) RoutingKey() string {
 	return f.routingKey
 }
 
+func (f *fakeDelivery) Redelivered() bool {
+	return f.redelivered
+}
+
 func (f *fakeDelivery) Ack() error {
 	f.ackCalls++
 
@@ -654,9 +668,11 @@ func (f *fakeDelivery) Nack(requeue bool) error {
 	return nil
 }
 
-func (f *fakeRepository) ClaimForProcessing(context.Context, string) (bool, error) {
+func (f *fakeRepository) ClaimForProcessing(_ context.Context, _ string, messageID string, redelivered bool) (bool, error) {
 	index := f.claimCalls
 	f.claimCalls++
+	f.claimMessageIDs = append(f.claimMessageIDs, messageID)
+	f.claimRedeliveries = append(f.claimRedeliveries, redelivered)
 	if len(f.claimResults) == 0 {
 		return false, nil
 	}

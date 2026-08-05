@@ -76,7 +76,7 @@ func TestDownloadHandler_InvalidPathParameters(t *testing.T) {
 		path string
 	}{
 		{name: "invalid avatar ID", path: "/api/v1/avatars/not-a-uuid"},
-		{name: "too long user ID", path: "/api/v1/users/" + strings.Repeat("a", maxUserIDLen+1) + "/avatar"},
+		{name: "too long user ID", path: "/api/v1/users/" + strings.Repeat("a", maxUserIDBytes+1) + "/avatar"},
 	}
 
 	for _, tt := range tests {
