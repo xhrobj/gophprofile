@@ -38,7 +38,7 @@ func Run(
 
 	lg.Info("server shutdown started")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 	defer cancel()
 
 	shutdownErr := httpServer.Shutdown(shutdownCtx)

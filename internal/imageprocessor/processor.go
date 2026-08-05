@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
-	_ "image/png"
+	_ "image/png" // регистрирует PNG-декодер для image.Decode
 	"io"
 
 	"github.com/xhrobj/gophprofile/internal/model"
 	"golang.org/x/image/draw"
-	_ "golang.org/x/image/webp"
+	_ "golang.org/x/image/webp" // регистрирует WebP-декодер для image.Decode
 )
 
 const (

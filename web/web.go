@@ -2,7 +2,7 @@
 package web
 
 import (
-	_ "embed"
+	_ "embed" // подключает поддержку директивы //go:embed
 	"io"
 	"net/http"
 )

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 
 	"go.uber.org/zap"
@@ -146,48 +147,13 @@ func (h *uploadHandler) readMultipartFile(w http.ResponseWriter, r *http.Request
 			return uploadedFile{}, fmt.Errorf("read multipart part: %w", nextErr)
 		}
 
-		if part.FormName() != "file" {
-			if _, copyErr := io.Copy(io.Discard, part); copyErr != nil {
-				_ = part.Close()
-
-				return uploadedFile{}, fmt.Errorf("discard multipart field: %w", copyErr)
-			}
-			_ = part.Close()
-
-			continue
-		}
-
-		if found {
-			_ = part.Close()
-
-			return uploadedFile{}, errors.New("multipart field file must be provided exactly once")
-		}
-		found = true
-
-		fileName := part.FileName()
-		if fileName == "" {
-			_ = part.Close()
-
-			return uploadedFile{}, errors.New("multipart field file must contain a file")
-		}
-		if err := validateFileName(fileName); err != nil {
-			_ = part.Close()
-
+		partFile, isFile, err := h.readMultipartPart(part, found)
+		if err != nil {
 			return uploadedFile{}, err
 		}
-
-		content, readErr := io.ReadAll(io.LimitReader(part, h.maxUploadSize+1))
-		_ = part.Close()
-		if readErr != nil {
-			return uploadedFile{}, fmt.Errorf("read multipart file: %w", readErr)
-		}
-		if int64(len(content)) > h.maxUploadSize {
-			return uploadedFile{}, errFileTooLarge
-		}
-
-		file = uploadedFile{
-			fileName: fileName,
-			content:  content,
+		if isFile {
+			file = partFile
+			found = true
 		}
 	}
 
@@ -196,4 +162,61 @@ func (h *uploadHandler) readMultipartFile(w http.ResponseWriter, r *http.Request
 	}
 
 	return file, nil
+}
+
+func (h *uploadHandler) readMultipartPart(part *multipart.Part, fileFound bool) (uploadedFile, bool, error) {
+	if part.FormName() != "file" {
+		return uploadedFile{}, false, discardMultipartPart(part)
+	}
+	if fileFound {
+		_ = part.Close()
+
+		return uploadedFile{}, false, errors.New("multipart field file must be provided exactly once")
+	}
+
+	file, err := h.readUploadedFilePart(part)
+	if err != nil {
+		return uploadedFile{}, false, err
+	}
+
+	return file, true, nil
+}
+
+func (h *uploadHandler) readUploadedFilePart(part *multipart.Part) (uploadedFile, error) {
+	defer func() {
+		_ = part.Close()
+	}()
+
+	fileName := part.FileName()
+	if fileName == "" {
+		return uploadedFile{}, errors.New("multipart field file must contain a file")
+	}
+	if err := validateFileName(fileName); err != nil {
+		return uploadedFile{}, err
+	}
+
+	content, err := io.ReadAll(io.LimitReader(part, h.maxUploadSize+1))
+	if err != nil {
+		return uploadedFile{}, fmt.Errorf("read multipart file: %w", err)
+	}
+	if int64(len(content)) > h.maxUploadSize {
+		return uploadedFile{}, errFileTooLarge
+	}
+
+	return uploadedFile{
+		fileName: fileName,
+		content:  content,
+	}, nil
+}
+
+func discardMultipartPart(part *multipart.Part) error {
+	defer func() {
+		_ = part.Close()
+	}()
+
+	if _, err := io.Copy(io.Discard, part); err != nil {
+		return fmt.Errorf("discard multipart field: %w", err)
+	}
+
+	return nil
 }

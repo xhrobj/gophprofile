@@ -5,11 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	_ "image/jpeg" // регистрирует JPEG-декодер для image.DecodeConfig
+	_ "image/png"  // регистрирует PNG-декодер для image.DecodeConfig
 
-	_ "image/jpeg"
-	_ "image/png"
-
-	_ "golang.org/x/image/webp"
+	_ "golang.org/x/image/webp" // регистрирует WebP-декодер для image.DecodeConfig
 )
 
 const (

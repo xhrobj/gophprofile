@@ -134,59 +134,14 @@ func (w *Worker) handleAvatarUploadedDelivery(ctx context.Context, item broker.D
 
 	claimed, err := w.claimWithRetry(ctx, messageLogger, message.AvatarID, message.MessageID, item.Redelivered())
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
-
-		messageLogger.Error("failed to claim avatar for processing", zap.Error(err))
-		if nackErr := item.Nack(false); nackErr != nil {
-			return fmt.Errorf("dead-letter unclaimed %s message: %w", event.AvatarUploadedRoutingKey, nackErr)
-		}
-
-		return nil
+		return w.handleAvatarClaimError(ctx, item, messageLogger, err)
 	}
-
 	if !claimed {
-		messageLogger.Info("avatar already claimed, processed or deleted; acknowledging duplicate message")
-
-		if ackErr := item.Ack(); ackErr != nil {
-			return fmt.Errorf("ack duplicate %s message: %w", event.AvatarUploadedRoutingKey, ackErr)
-		}
-
-		return nil
+		return w.ackDuplicateAvatarUpload(item, messageLogger)
 	}
 
 	if err := w.processWithRetry(ctx, messageLogger, message); err != nil {
-		if ctx.Err() != nil {
-			return w.requeueOnShutdown(item, messageLogger, message.AvatarID)
-		}
-
-		if errors.Is(err, model.ErrAvatarNotFound) {
-			messageLogger.Info("avatar was deleted during processing; cleaning up thumbnails")
-			if cleanupErr := w.deleteKeysWithRetry(ctx, messageLogger, thumbnailKeys(message)...); cleanupErr != nil {
-				messageLogger.Error("failed to clean up thumbnails for deleted avatar", zap.Error(cleanupErr))
-				if nackErr := item.Nack(false); nackErr != nil {
-					return fmt.Errorf("dead-letter deleted %s message after cleanup failure: %w", event.AvatarUploadedRoutingKey, nackErr)
-				}
-
-				return nil
-			}
-
-			if ackErr := item.Ack(); ackErr != nil {
-				return fmt.Errorf("ack deleted %s message: %w", event.AvatarUploadedRoutingKey, ackErr)
-			}
-
-			return nil
-		}
-
-		messageLogger.Error("avatar processing failed", zap.Error(err))
-		w.finalizeFailure(messageLogger, message)
-
-		if nackErr := item.Nack(false); nackErr != nil {
-			return fmt.Errorf("dead-letter failed %s message: %w", event.AvatarUploadedRoutingKey, nackErr)
-		}
-
-		return nil
+		return w.handleAvatarProcessingError(ctx, item, messageLogger, message, err)
 	}
 
 	if ackErr := item.Ack(); ackErr != nil {
@@ -194,6 +149,85 @@ func (w *Worker) handleAvatarUploadedDelivery(ctx context.Context, item broker.D
 	}
 
 	messageLogger.Info("avatar processing completed")
+
+	return nil
+}
+
+func (w *Worker) handleAvatarClaimError(
+	ctx context.Context,
+	item broker.Delivery,
+	lg *zap.Logger,
+	claimErr error,
+) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+
+	lg.Error("failed to claim avatar for processing", zap.Error(claimErr))
+	if nackErr := item.Nack(false); nackErr != nil {
+		return fmt.Errorf("dead-letter unclaimed %s message: %w", event.AvatarUploadedRoutingKey, nackErr)
+	}
+
+	return nil
+}
+
+func (w *Worker) ackDuplicateAvatarUpload(item broker.Delivery, lg *zap.Logger) error {
+	lg.Info("avatar already claimed, processed or deleted; acknowledging duplicate message")
+
+	if ackErr := item.Ack(); ackErr != nil {
+		return fmt.Errorf("ack duplicate %s message: %w", event.AvatarUploadedRoutingKey, ackErr)
+	}
+
+	return nil
+}
+
+func (w *Worker) handleAvatarProcessingError(
+	ctx context.Context,
+	item broker.Delivery,
+	lg *zap.Logger,
+	message event.AvatarUploaded,
+	processErr error,
+) error {
+	if ctx.Err() != nil {
+		return w.requeueOnShutdown(item, lg, message.AvatarID)
+	}
+	if errors.Is(processErr, model.ErrAvatarNotFound) {
+		return w.finishDeletedAvatarProcessing(ctx, item, lg, message)
+	}
+
+	lg.Error("avatar processing failed", zap.Error(processErr))
+	w.finalizeFailure(lg, message)
+
+	if nackErr := item.Nack(false); nackErr != nil {
+		return fmt.Errorf("dead-letter failed %s message: %w", event.AvatarUploadedRoutingKey, nackErr)
+	}
+
+	return nil
+}
+
+func (w *Worker) finishDeletedAvatarProcessing(
+	ctx context.Context,
+	item broker.Delivery,
+	lg *zap.Logger,
+	message event.AvatarUploaded,
+) error {
+	lg.Info("avatar was deleted during processing; cleaning up thumbnails")
+	if cleanupErr := w.deleteKeysWithRetry(ctx, lg, thumbnailKeys(message)...); cleanupErr != nil {
+		lg.Error("failed to clean up thumbnails for deleted avatar", zap.Error(cleanupErr))
+		if nackErr := item.Nack(false); nackErr != nil {
+			return fmt.Errorf(
+				"dead-letter deleted %s message after cleanup failure: %w",
+				event.AvatarUploadedRoutingKey,
+				nackErr,
+			)
+		}
+
+		return nil
+	}
+
+	if ackErr := item.Ack(); ackErr != nil {
+		return fmt.Errorf("ack deleted %s message: %w", event.AvatarUploadedRoutingKey, ackErr)
+	}
 
 	return nil
 }
