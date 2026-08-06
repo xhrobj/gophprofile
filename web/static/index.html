@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Avatar Upload</title>
+  <title>👤 [(^.^)] GophProfile</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script>
     tailwind.config = {
@@ -23,8 +23,8 @@
   <div class="container mx-auto px-4 py-8 max-w-2xl">
     <div class="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 overflow-hidden">
       <header class="bg-gradient-to-r from-purple-600 to-blue-600 p-6">
-        <h1 class="text-3xl font-bold text-white text-center">Avatar Upload Service</h1>
-        <p class="text-white/80 text-center mt-2">Upload your avatar image</p>
+        <h1 class="text-3xl font-bold text-white text-center">[(^.^)] GophProfile</h1>
+        <p class="text-white/80 text-center mt-2">Upload, view and delete user avatars</p>
       </header>
 
       <main class="p-6 space-y-6">
@@ -42,7 +42,7 @@
               Choose Image <span class="text-red-400">*</span>
             </label>
             <div class="relative">
-              <input type="file" id="image" name="image" accept="image/*" required
+              <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/webp" required
                 class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-600 file:text-white hover:file:bg-purple-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all">
             </div>
             <div id="imagePreview" class="mt-4 hidden">
@@ -64,6 +64,11 @@
               Uploading...
             </span>
           </button>
+
+          <button type="button" id="galleryBtn"
+            class="w-full bg-white/10 border border-white/20 text-white font-semibold py-3 px-6 rounded-lg hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all duration-200">
+            Show Gallery
+          </button>
         </form>
 
         <div id="responseContainer" class="hidden">
@@ -77,6 +82,15 @@
             </div>
           </div>
         </div>
+
+        <section id="galleryContainer" class="hidden border-t border-white/20 pt-6">
+          <div class="flex items-center justify-between gap-4 mb-4">
+            <h2 class="text-xl font-semibold text-white">Gallery</h2>
+            <span id="galleryCount" class="text-sm text-white/60"></span>
+          </div>
+          <div id="galleryContent" class="grid grid-cols-1 sm:grid-cols-2 gap-4"></div>
+          <p id="galleryEmpty" class="hidden text-white/60 text-center py-6">No avatars yet.</p>
+        </section>
 
         <div id="errorMessage" class="hidden bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg">
         </div>
@@ -93,6 +107,11 @@
     const btnText = document.getElementById('btnText');
     const btnLoader = document.getElementById('btnLoader');
     const responseContainer = document.getElementById('responseContainer');
+    const galleryBtn = document.getElementById('galleryBtn');
+    const galleryContainer = document.getElementById('galleryContainer');
+    const galleryContent = document.getElementById('galleryContent');
+    const galleryCount = document.getElementById('galleryCount');
+    const galleryEmpty = document.getElementById('galleryEmpty');
     const responseStatus = document.getElementById('responseStatus');
     const responseJson = document.getElementById('responseJson');
     const errorMessage = document.getElementById('errorMessage');
@@ -111,10 +130,21 @@
       }
     });
 
+    galleryBtn.addEventListener('click', async function () {
+      const userId = document.getElementById('userId').value.trim();
+      if (!userId) {
+        showError('Please enter a user ID');
+        return;
+      }
+
+      hideError();
+      await loadGallery(userId);
+    });
+
     form.addEventListener('submit', async function (e) {
       e.preventDefault();
 
-      const userId = document.getElementById('userId').value;
+      const userId = document.getElementById('userId').value.trim();
       const imageFile = imageInput.files[0];
 
       if (!userId || !imageFile) {
@@ -127,7 +157,7 @@
       hideResponse();
 
       const formData = new FormData();
-      formData.append('image', imageFile);
+      formData.append('file', imageFile);
 
       try {
         const response = await fetch('/api/v1/avatars', {
@@ -148,6 +178,9 @@
         }
 
         displayResponse(response, parsedData);
+        if (response.ok) {
+          await loadGallery(userId);
+        }
 
       } catch (error) {
         showError(`Network error: ${error.message}`);
@@ -155,6 +188,106 @@
         setLoading(false);
       }
     });
+
+    async function loadGallery(userId) {
+      try {
+        const response = await fetch(`/api/v1/users/${encodeURIComponent(userId)}/avatars`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          showError(data.details || `Gallery request failed: ${response.status} ${response.statusText}`);
+          return;
+        }
+
+        renderGallery(userId, data.avatars || []);
+      } catch (error) {
+        showError(`Gallery error: ${error.message}`);
+      }
+    }
+
+    function renderGallery(userId, avatars) {
+      galleryContainer.classList.remove('hidden');
+      galleryContent.replaceChildren();
+      galleryCount.textContent = `${avatars.length} avatar${avatars.length === 1 ? '' : 's'}`;
+      galleryEmpty.classList.toggle('hidden', avatars.length !== 0);
+
+      avatars.forEach(function (avatar) {
+        const card = document.createElement('article');
+        card.className = 'bg-white/10 border border-white/20 rounded-xl p-4 space-y-3';
+
+        const image = document.createElement('img');
+        image.src = avatar.url;
+        image.alt = `Avatar ${avatar.id}`;
+        image.className = 'w-32 h-32 object-cover rounded-lg shadow-lg mx-auto bg-black/20';
+
+        const status = document.createElement('div');
+        status.className = 'text-sm text-white/70 text-center';
+        status.textContent = avatar.status;
+
+        const actions = document.createElement('div');
+        actions.className = 'flex gap-2';
+
+        const openLink = document.createElement('a');
+        openLink.href = avatar.url;
+        openLink.target = '_blank';
+        openLink.rel = 'noopener noreferrer';
+        openLink.className = 'flex-1 text-center bg-white/10 border border-white/20 text-white py-2 px-3 rounded-lg hover:bg-white/20 transition-colors';
+        openLink.textContent = 'Open';
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'flex-1 bg-red-500/20 border border-red-500/50 text-red-200 py-2 px-3 rounded-lg hover:bg-red-500/30 transition-colors';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', async function () {
+          await deleteAvatar(userId, avatar.id, deleteBtn);
+        });
+
+        actions.append(openLink, deleteBtn);
+        card.append(image, status, actions);
+        galleryContent.append(card);
+      });
+    }
+
+    async function deleteAvatar(userId, avatarId, button) {
+      button.disabled = true;
+
+      try {
+        const response = await fetch(`/api/v1/avatars/${encodeURIComponent(avatarId)}`, {
+          method: 'DELETE',
+          headers: {
+            'X-User-ID': userId
+          }
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          showError(data.details || `Delete failed: ${response.status} ${response.statusText}`);
+          return;
+        }
+
+        hideError();
+        await loadGallery(userId);
+      } catch (error) {
+        showError(`Delete error: ${error.message}`);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function loadGalleryFromPath() {
+      const match = window.location.pathname.match(/^\/web\/gallery\/(.+)$/);
+      if (!match) {
+        return;
+      }
+
+      try {
+        const userId = decodeURIComponent(match[1]);
+        document.getElementById('userId').value = userId;
+        loadGallery(userId);
+      } catch {
+        showError('Invalid user ID in gallery URL');
+      }
+    }
 
     function setLoading(loading) {
       if (loading) {
@@ -202,6 +335,8 @@
     function hideResponse() {
       responseContainer.classList.add('hidden');
     }
+
+    loadGalleryFromPath();
   </script>
 </body>
 

@@ -1,0 +1,27 @@
+# Coverage profiles
+*.out
+
+# Build artifacts
+/bin/
+
+# Local documentation
+/docs/local/
+
+# IDEs
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+__MACOSX/
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+
+# GitHub Actions
+.github/
+
+# Git
+.git/

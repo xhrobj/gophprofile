@@ -1,0 +1,580 @@
+openapi: 3.0.3
+info:
+  title: GophProfile API
+  version: 0.1.0
+  description: REST API для загрузки, получения и удаления пользовательских аватаров.
+servers:
+  - url: /
+tags:
+  - name: Avatars
+    description: Операции с аватарками.
+  - name: Users
+    description: Операции с аватарками пользователя.
+  - name: Health
+    description: Проверка работоспособности сервиса и его зависимостей.
+paths:
+  /api/v1/avatars:
+    post:
+      tags:
+        - Avatars
+      operationId: uploadAvatar
+      summary: Загрузить аватарку
+      parameters:
+        - $ref: '#/components/parameters/XUserID'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  maxLength: 10485760
+                  description: JPEG, PNG или WebP размером не более 10 MiB; имя файла — не более 255 байт в UTF-8.
+            encoding:
+              file:
+                contentType: image/jpeg, image/png, image/webp
+      responses:
+        '201':
+          description: Аватарка принята и поставлена в очередь на обработку.
+          headers:
+            Location:
+              description: URL созданной аватарки.
+              schema:
+                type: string
+                format: uri-reference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvatarUploadResponse'
+              example:
+                id: c0decafe-babe-4bed-b00d-feeddeadbeef
+                user_id: Alice
+                url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef
+                status: processing
+                created_at: '2026-07-30T12:00:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /api/v1/avatars/{avatar_id}:
+    parameters:
+      - $ref: '#/components/parameters/AvatarID'
+    get:
+      tags:
+        - Avatars
+      operationId: getAvatar
+      summary: Получить оригинал или миниатюру аватарки
+      parameters:
+        - $ref: '#/components/parameters/AvatarSize'
+      responses:
+        '200':
+          description: Данные изображения.
+          headers:
+            Cache-Control:
+              description: Правила кеширования изображения.
+              schema:
+                type: string
+              example: max-age=86400
+            ETag:
+              description: Идентификатор версии изображения.
+              schema:
+                type: string
+              example: '"sha256:42"'
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+        - Avatars
+      operationId: deleteAvatar
+      summary: Удалить аватарку
+      parameters:
+        - $ref: '#/components/parameters/XUserID'
+      responses:
+        '204':
+          description: Аватарка помечена удалённой, удаление файлов поставлено в очередь.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /api/v1/avatars/{avatar_id}/metadata:
+    get:
+      tags:
+        - Avatars
+      operationId: getAvatarMetadata
+      summary: Получить метаданные аватарки
+      parameters:
+        - $ref: '#/components/parameters/AvatarID'
+      responses:
+        '200':
+          description: Метаданные аватарки.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvatarMetadata'
+              example:
+                id: c0decafe-babe-4bed-b00d-feeddeadbeef
+                user_id: Alice
+                file_name: avatar.jpg
+                mime_type: image/jpeg
+                size: 1024000
+                dimensions:
+                  width: 1920
+                  height: 1080
+                thumbnails:
+                  - size: 100x100
+                    url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef?size=100x100
+                  - size: 300x300
+                    url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef?size=300x300
+                upload_status: completed
+                processing_status: completed
+                created_at: '2026-07-30T12:00:00Z'
+                updated_at: '2026-07-30T12:00:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /api/v1/users/{user_id}/avatar:
+    parameters:
+      - $ref: '#/components/parameters/UserID'
+    get:
+      tags:
+        - Users
+      operationId: getUserAvatar
+      summary: Получить актуальную аватарку пользователя
+      parameters:
+        - $ref: '#/components/parameters/AvatarSize'
+      responses:
+        '200':
+          description: Данные изображения.
+          headers:
+            Cache-Control:
+              description: Правила кеширования изображения.
+              schema:
+                type: string
+              example: max-age=86400
+            ETag:
+              description: Идентификатор версии изображения.
+              schema:
+                type: string
+              example: '"sha256:42"'
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+        - Users
+      operationId: deleteUserAvatar
+      summary: Удалить актуальную аватарку пользователя
+      parameters:
+        - $ref: '#/components/parameters/XUserID'
+      responses:
+        '204':
+          description: Аватарка помечена удалённой, удаление файлов поставлено в очередь.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /api/v1/users/{user_id}/avatars:
+    get:
+      tags:
+        - Users
+      operationId: listUserAvatars
+      summary: Получить список аватарок пользователя
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: Список неудалённых аватарок пользователя.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvatarList'
+              example:
+                avatars:
+                  - id: c0decafe-babe-4bed-b00d-feeddeadbeef
+                    user_id: Alice
+                    url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef
+                    status: completed
+                    created_at: '2026-07-30T12:00:00Z'
+                total: 1
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /health:
+    get:
+      tags:
+        - Health
+      operationId: getHealth
+      summary: Проверить работоспособность сервиса
+      responses:
+        '200':
+          description: Сервис и обязательные зависимости доступны.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+                components:
+                  database:
+                    status: ok
+                  s3:
+                    status: ok
+                  broker:
+                    status: ok
+        '503':
+          description: Сервис не готов обслуживать запросы из-за недоступной зависимости.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: unavailable
+                components:
+                  database:
+                    status: ok
+                  s3:
+                    status: error
+                    error: connection refused
+                  broker:
+                    status: ok
+components:
+  parameters:
+    XUserID:
+      name: X-User-ID
+      in: header
+      required: true
+      description: Идентификатор пользователя, выполняющего операцию; не более 255 байт в UTF-8.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+      example: Alice
+    AvatarID:
+      name: avatar_id
+      in: path
+      required: true
+      description: UUID аватарки.
+      schema:
+        type: string
+        format: uuid
+      example: c0decafe-babe-4bed-b00d-feeddeadbeef
+    UserID:
+      name: user_id
+      in: path
+      required: true
+      description: Идентификатор пользователя; не более 255 байт в UTF-8.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+      example: Alice
+    AvatarSize:
+      name: size
+      in: query
+      required: false
+      description: Требуемый размер изображения. Преобразование формата в первой версии API не поддерживается.
+      schema:
+        type: string
+        enum:
+          - original
+          - 100x100
+          - 300x300
+        default: original
+  responses:
+    BadRequest:
+      description: Запрос не соответствует контракту API.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: invalid_request
+            details: request parameters are invalid
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
+    Forbidden:
+      description: Пользователь не имеет права выполнить операцию.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: forbidden
+            details: Eve can only delete her own avatars
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
+    NotFound:
+      description: Аватарка или пользователь не найдены.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: not_found
+            details: avatar not found
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
+    PayloadTooLarge:
+      description: Размер файла превышает 10 MiB.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: file_too_large
+            details: maximum upload size is 10485760 bytes
+            max_size: 10485760
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
+    ServiceUnavailable:
+      description: Сервис временно не может завершить операцию из-за недоступности брокера сообщений.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: service_unavailable
+            details: service temporarily unavailable
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
+    InternalServerError:
+      description: Внутренняя ошибка сервиса.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: internal_error
+            details: internal server error
+            request_id: faceb00cf00dfeeddeadbeefc0decafe
+  schemas:
+    AvatarUploadResponse:
+      type: object
+      required:
+        - id
+        - user_id
+        - url
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+        url:
+          type: string
+          format: uri-reference
+        status:
+          type: string
+          enum:
+            - processing
+            - completed
+            - failed
+        created_at:
+          type: string
+          format: date-time
+    AvatarSummary:
+      allOf:
+        - $ref: '#/components/schemas/AvatarUploadResponse'
+    AvatarList:
+      type: object
+      required:
+        - avatars
+        - total
+      properties:
+        avatars:
+          type: array
+          items:
+            $ref: '#/components/schemas/AvatarSummary'
+        total:
+          type: integer
+          minimum: 0
+    AvatarMetadata:
+      type: object
+      required:
+        - id
+        - user_id
+        - file_name
+        - mime_type
+        - size
+        - dimensions
+        - thumbnails
+        - upload_status
+        - processing_status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+        file_name:
+          type: string
+        mime_type:
+          type: string
+          enum:
+            - image/jpeg
+            - image/png
+            - image/webp
+        size:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 10485760
+        dimensions:
+          $ref: '#/components/schemas/Dimensions'
+        thumbnails:
+          type: array
+          items:
+            $ref: '#/components/schemas/Thumbnail'
+        upload_status:
+          type: string
+          enum:
+            - uploading
+            - completed
+            - failed
+        processing_status:
+          type: string
+          enum:
+            - pending
+            - processing
+            - completed
+            - failed
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Dimensions:
+      type: object
+      required:
+        - width
+        - height
+      properties:
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+    Thumbnail:
+      type: object
+      required:
+        - size
+        - url
+      properties:
+        size:
+          type: string
+          enum:
+            - 100x100
+            - 300x300
+        url:
+          type: string
+          format: uri-reference
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+        max_size:
+          type: integer
+          format: int64
+          minimum: 1
+        request_id:
+          type: string
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - components
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - unavailable
+        components:
+          type: object
+          required:
+            - database
+            - s3
+            - broker
+          properties:
+            database:
+              $ref: '#/components/schemas/ComponentHealth'
+            s3:
+              $ref: '#/components/schemas/ComponentHealth'
+            broker:
+              $ref: '#/components/schemas/ComponentHealth'
+    ComponentHealth:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - error
+        error:
+          type: string
