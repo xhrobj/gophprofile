@@ -22,6 +22,9 @@ const (
 	envRabbitMQExchange = "RABBITMQ_EXCHANGE"
 	envRabbitMQQueue    = "RABBITMQ_QUEUE"
 
+	envTracingEnabled = "TRACING_ENABLED"
+	envOTLPEndpoint   = "OTEL_EXPORTER_OTLP_ENDPOINT"
+
 	envLogLevel = "LOG_LEVEL"
 
 	envHTTPAddress     = "HTTP_ADDRESS"
@@ -42,6 +45,9 @@ type Common struct {
 	RabbitMQURL      string
 	RabbitMQExchange string
 	RabbitMQQueue    string
+
+	TracingEnabled bool
+	OTLPEndpoint   string
 
 	LogLevel string
 }
@@ -145,6 +151,16 @@ func loadCommon() (Common, error) {
 		return Common{}, err
 	}
 
+	tracingEnabled, err := optionalBoolean(envTracingEnabled)
+	if err != nil {
+		return Common{}, err
+	}
+
+	otlpExporterEndpoint := strings.TrimSpace(os.Getenv(envOTLPEndpoint))
+	if tracingEnabled && otlpExporterEndpoint == "" {
+		return Common{}, fmt.Errorf("environment variable %s is required when tracing is enabled", envOTLPEndpoint)
+	}
+
 	logLevel, err := logLevel()
 	if err != nil {
 		return Common{}, err
@@ -163,6 +179,9 @@ func loadCommon() (Common, error) {
 		RabbitMQExchange: rabbitMQExchange,
 		RabbitMQQueue:    rabbitMQQueue,
 
+		TracingEnabled: tracingEnabled,
+		OTLPEndpoint:   otlpExporterEndpoint,
+
 		LogLevel: logLevel,
 	}, nil
 }
@@ -180,6 +199,20 @@ func boolean(name string) (bool, error) {
 	value, err := required(name)
 	if err != nil {
 		return false, err
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("environment variable %s must be a boolean: %w", name, err)
+	}
+
+	return parsed, nil
+}
+
+func optionalBoolean(name string) (bool, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return false, nil
 	}
 
 	parsed, err := strconv.ParseBool(value)
