@@ -108,72 +108,86 @@ func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (model.Av
 		int64(len(input.Content)),
 		metadata.mimeType,
 	); err != nil {
-		statusCtx, cancelStatus := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
-		statusErr := s.repository.UpdateUploadStatus(statusCtx, avatar.ID, model.UploadStatusFailed)
-		cancelStatus()
-		if statusErr != nil {
-			return model.Avatar{}, errors.Join(
-				fmt.Errorf("store avatar original: %w", err),
-				fmt.Errorf("mark avatar upload failed: %w", statusErr),
-			)
-		}
-
-		return model.Avatar{}, fmt.Errorf("store avatar original: %w", err)
+		return model.Avatar{}, s.recoverStoreFailure(avatar.ID, err)
 	}
 
 	if err := s.repository.UpdateUploadStatus(ctx, avatar.ID, model.UploadStatusCompleted); err != nil {
-		resultErr := fmt.Errorf("complete avatar upload: %w", err)
-
-		statusCtx, cancelStatus := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
-		statusErr := s.repository.UpdateUploadStatus(statusCtx, avatar.ID, model.UploadStatusFailed)
-		cancelStatus()
-		if statusErr != nil {
-			return model.Avatar{}, errors.Join(
-				resultErr,
-				fmt.Errorf("mark avatar upload failed: %w", statusErr),
-			)
-		}
-
-		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
-		deleteErr := s.storage.Delete(cleanupCtx, key)
-		cancelCleanup()
-		if deleteErr != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("delete avatar original after upload failure: %w", deleteErr))
-		}
-
-		return model.Avatar{}, resultErr
+		return model.Avatar{}, s.recoverUploadCompletionFailure(avatar.ID, key, err)
 	}
 
 	avatar.UploadStatus = model.UploadStatusCompleted
 
 	if err := s.publisher.PublishAvatarUploaded(ctx, avatar); err != nil {
-		resultErr := errors.Join(
-			ErrServiceUnavailable,
-			fmt.Errorf("publish avatar uploaded event: %w", err),
-		)
-
-		metadataCtx, cancelMetadata := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
-		deleteMetadataErr := s.repository.DeletePermanent(metadataCtx, avatar.ID)
-		cancelMetadata()
-		if deleteMetadataErr != nil {
-			return model.Avatar{}, errors.Join(
-				resultErr,
-				fmt.Errorf("delete avatar metadata after publish failure: %w", deleteMetadataErr),
-			)
-		}
-
-		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
-		deleteOriginalErr := s.storage.Delete(cleanupCtx, key)
-		cancelCleanup()
-		if deleteOriginalErr != nil {
-			resultErr = errors.Join(
-				resultErr,
-				fmt.Errorf("delete avatar original after publish failure: %w", deleteOriginalErr),
-			)
-		}
-
-		return model.Avatar{}, resultErr
+		return model.Avatar{}, s.rollbackPublishFailure(avatar.ID, key, err)
 	}
 
 	return avatar, nil
+}
+
+func (s *AvatarService) recoverStoreFailure(avatarID string, cause error) error {
+	resultErr := fmt.Errorf("store avatar original: %w", cause)
+
+	statusCtx, cancelStatus := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
+	statusErr := s.repository.UpdateUploadStatus(statusCtx, avatarID, model.UploadStatusFailed)
+	cancelStatus()
+	if statusErr != nil {
+		return errors.Join(
+			resultErr,
+			fmt.Errorf("mark avatar upload failed: %w", statusErr),
+		)
+	}
+
+	return resultErr
+}
+
+func (s *AvatarService) recoverUploadCompletionFailure(avatarID, key string, cause error) error {
+	resultErr := fmt.Errorf("complete avatar upload: %w", cause)
+
+	statusCtx, cancelStatus := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
+	statusErr := s.repository.UpdateUploadStatus(statusCtx, avatarID, model.UploadStatusFailed)
+	cancelStatus()
+	if statusErr != nil {
+		return errors.Join(
+			resultErr,
+			fmt.Errorf("mark avatar upload failed: %w", statusErr),
+		)
+	}
+
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
+	deleteErr := s.storage.Delete(cleanupCtx, key)
+	cancelCleanup()
+	if deleteErr != nil {
+		resultErr = errors.Join(resultErr, fmt.Errorf("delete avatar original after upload failure: %w", deleteErr))
+	}
+
+	return resultErr
+}
+
+func (s *AvatarService) rollbackPublishFailure(avatarID, key string, cause error) error {
+	resultErr := errors.Join(
+		ErrServiceUnavailable,
+		fmt.Errorf("publish avatar uploaded event: %w", cause),
+	)
+
+	metadataCtx, cancelMetadata := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
+	deleteMetadataErr := s.repository.DeletePermanent(metadataCtx, avatarID)
+	cancelMetadata()
+	if deleteMetadataErr != nil {
+		return errors.Join(
+			resultErr,
+			fmt.Errorf("delete avatar metadata after publish failure: %w", deleteMetadataErr),
+		)
+	}
+
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
+	deleteOriginalErr := s.storage.Delete(cleanupCtx, key)
+	cancelCleanup()
+	if deleteOriginalErr != nil {
+		resultErr = errors.Join(
+			resultErr,
+			fmt.Errorf("delete avatar original after publish failure: %w", deleteOriginalErr),
+		)
+	}
+
+	return resultErr
 }

@@ -138,11 +138,7 @@ func (p *Publisher) publish(
 	}
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	confirmCtx, cancel := context.WithTimeout(ctx, publisherConfirmTimeout)
-	defer cancel()
-
 	confirmation, err := p.channel.PublishWithDeferredConfirmWithContext(
 		confirmCtx,
 		p.exchange,
@@ -158,6 +154,9 @@ func (p *Publisher) publish(
 			Body:         body,
 		},
 	)
+	p.mu.Unlock()
+	defer cancel()
+
 	if err != nil {
 		return fmt.Errorf("publish %s event: %w", routingKey, err)
 	}

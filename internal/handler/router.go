@@ -9,13 +9,21 @@ import (
 	"github.com/xhrobj/gophprofile/web"
 )
 
-// NewRouter создаёт HTTP-маршрутизатор Сервера с middleware и зарегистрированными маршрутами.
-func NewRouter(baseLogger *zap.Logger, avatarService interface {
+// AvatarService объединяет операции сервиса аватаров, используемые HTTP-маршрутизатором.
+type AvatarService interface {
 	avatarUploader
 	avatarDownloader
 	avatarMetadataReader
 	avatarDeleter
-}, healthChecker healthChecker, maxUploadSize int64) http.Handler {
+}
+
+// NewRouter создаёт HTTP-маршрутизатор Сервера с middleware и зарегистрированными маршрутами.
+func NewRouter(
+	baseLogger *zap.Logger,
+	avatarService AvatarService,
+	healthChecker healthChecker,
+	maxUploadSize int64,
+) http.Handler {
 	router := chi.NewRouter()
 
 	router.Use(requestIDMiddleware(baseLogger))

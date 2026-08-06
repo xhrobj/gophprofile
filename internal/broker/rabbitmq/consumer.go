@@ -126,12 +126,13 @@ func forwardDeliveries(ctx context.Context, source <-chan amqp.Delivery, target 
 
 	for item := range source {
 		if ctx.Err() != nil {
-			continue
+			return
 		}
 
 		select {
 		case target <- delivery{value: item}:
 		case <-ctx.Done():
+			return
 		}
 	}
 }

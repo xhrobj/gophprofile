@@ -290,67 +290,23 @@ func (w *Worker) claimWithRetry(
 	redelivered bool,
 ) (bool, error) {
 	var claimed bool
-	var resultErr error
 
-	for attempt := 1; attempt <= w.retry.maxAttempts; attempt++ {
-		if ctx.Err() != nil {
-			return false, ctx.Err()
-		}
+	err := w.retryOperation(ctx, lg, "claim avatar", func() error {
+		var claimErr error
+		claimed, claimErr = w.repository.ClaimForProcessing(ctx, avatarID, messageID, redelivered)
 
-		claimed, resultErr = w.repository.ClaimForProcessing(ctx, avatarID, messageID, redelivered)
-		if resultErr == nil {
-			return claimed, nil
-		}
-		if attempt == w.retry.maxAttempts {
-			break
-		}
+		return claimErr
+	}, nil)
 
-		lg.Warn(
-			"claim avatar attempt failed",
-			zap.Int("attempt", attempt),
-			zap.Int("max_attempts", w.retry.maxAttempts),
-			zap.Error(resultErr),
-		)
-
-		if err := waitRetry(ctx, w.retry.backoff(attempt)); err != nil {
-			return false, err
-		}
-	}
-
-	return false, resultErr
+	return claimed, err
 }
 
 func (w *Worker) processWithRetry(ctx context.Context, lg *zap.Logger, message event.AvatarUploaded) error {
-	var resultErr error
-
-	for attempt := 1; attempt <= w.retry.maxAttempts; attempt++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		resultErr = w.processOnce(ctx, message)
-		if resultErr == nil {
-			return nil
-		}
-		if errors.Is(resultErr, imageprocessor.ErrInvalidImage) ||
-			errors.Is(resultErr, model.ErrAvatarNotFound) ||
-			attempt == w.retry.maxAttempts {
-			return resultErr
-		}
-
-		lg.Warn(
-			"avatar processing attempt failed",
-			zap.Int("attempt", attempt),
-			zap.Int("max_attempts", w.retry.maxAttempts),
-			zap.Error(resultErr),
-		)
-
-		if err := waitRetry(ctx, w.retry.backoff(attempt)); err != nil {
-			return err
-		}
-	}
-
-	return resultErr
+	return w.retryOperation(ctx, lg, "avatar processing", func() error {
+		return w.processOnce(ctx, message)
+	}, func(err error) bool {
+		return !errors.Is(err, imageprocessor.ErrInvalidImage) && !errors.Is(err, model.ErrAvatarNotFound)
+	})
 }
 
 func (w *Worker) processOnce(ctx context.Context, message event.AvatarUploaded) error {
@@ -391,34 +347,9 @@ func (w *Worker) processOnce(ctx context.Context, message event.AvatarUploaded) 
 }
 
 func (w *Worker) deleteKeysWithRetry(ctx context.Context, lg *zap.Logger, keys ...string) error {
-	var resultErr error
-
-	for attempt := 1; attempt <= w.retry.maxAttempts; attempt++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		resultErr = w.storage.Delete(ctx, keys...)
-		if resultErr == nil {
-			return nil
-		}
-		if attempt == w.retry.maxAttempts {
-			break
-		}
-
-		lg.Warn(
-			"delete avatar files attempt failed",
-			zap.Int("attempt", attempt),
-			zap.Int("max_attempts", w.retry.maxAttempts),
-			zap.Error(resultErr),
-		)
-
-		if err := waitRetry(ctx, w.retry.backoff(attempt)); err != nil {
-			return err
-		}
-	}
-
-	return resultErr
+	return w.retryOperation(ctx, lg, "delete avatar files", func() error {
+		return w.storage.Delete(ctx, keys...)
+	}, nil)
 }
 
 func (w *Worker) finalizeFailure(lg *zap.Logger, message event.AvatarUploaded) {
@@ -474,24 +405,37 @@ func (w *Worker) updateProcessingStatusWithRetry(
 	avatarID string,
 	status model.ProcessingStatus,
 ) error {
+	retryLogger := lg.With(zap.String("status", string(status)))
+
+	return w.retryOperation(ctx, retryLogger, "update avatar processing status", func() error {
+		return w.repository.UpdateProcessingStatus(ctx, avatarID, status)
+	}, nil)
+}
+
+func (w *Worker) retryOperation(
+	ctx context.Context,
+	lg *zap.Logger,
+	operation string,
+	action func() error,
+	shouldRetry func(error) bool,
+) error {
 	var resultErr error
 
 	for attempt := 1; attempt <= w.retry.maxAttempts; attempt++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
-		resultErr = w.repository.UpdateProcessingStatus(ctx, avatarID, status)
+		resultErr = action()
 		if resultErr == nil {
 			return nil
 		}
-		if attempt == w.retry.maxAttempts {
-			break
+		if attempt == w.retry.maxAttempts || shouldRetry != nil && !shouldRetry(resultErr) {
+			return resultErr
 		}
 
 		lg.Warn(
-			"update avatar processing status attempt failed",
-			zap.String("status", string(status)),
+			operation+" attempt failed",
 			zap.Int("attempt", attempt),
 			zap.Int("max_attempts", w.retry.maxAttempts),
 			zap.Error(resultErr),
