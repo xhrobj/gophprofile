@@ -5,11 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
-
-	"go.uber.org/zap"
 )
 
 // Run запускает HTTP-Сервер и завершает его при отмене контекста.
@@ -18,14 +17,14 @@ func Run(
 	listener net.Listener,
 	httpServer *http.Server,
 	shutdownTimeout time.Duration,
-	lg *zap.Logger,
+	lg *slog.Logger,
 ) error {
 	serveErrors := make(chan error, 1)
 	go func() {
 		serveErrors <- httpServer.Serve(listener)
 	}()
 
-	lg.Info("server started", zap.String("address", listener.Addr().String()))
+	lg.InfoContext(ctx, "server started", slog.String("address", listener.Addr().String()))
 
 	select {
 	case err := <-serveErrors:
@@ -36,16 +35,16 @@ func Run(
 	case <-ctx.Done():
 	}
 
-	lg.Info("server shutdown started")
+	lg.InfoContext(ctx, "server shutdown started")
 
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 	defer cancel()
 
 	shutdownErr := httpServer.Shutdown(shutdownCtx)
 	if shutdownErr != nil {
-		lg.Warn(
+		lg.WarnContext(ctx,
 			"graceful server shutdown failed, forcing close",
-			zap.Error(shutdownErr),
+			slog.Any("error", shutdownErr),
 		)
 
 		if closeErr := httpServer.Close(); closeErr != nil {
@@ -60,7 +59,7 @@ func Run(
 		return fmt.Errorf("serve HTTP during shutdown: %w", err)
 	}
 
-	lg.Info("server stopped")
+	lg.InfoContext(ctx, "server stopped")
 
 	if shutdownErr != nil {
 		return fmt.Errorf("shutdown HTTP server: %w", shutdownErr)

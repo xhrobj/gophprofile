@@ -52,9 +52,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/AvatarUploadResponse'
               example:
-                id: c0decafe-babe-4bed-b00d-feeddeadbeef
+                id: c0decafe-babe-4bed-b042-feeddeadbeef
                 user_id: Alice
-                url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef
+                url: /api/v1/avatars/c0decafe-babe-4bed-b042-feeddeadbeef
                 status: processing
                 created_at: '2026-07-30T12:00:00Z'
         '400':
@@ -144,7 +144,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AvatarMetadata'
               example:
-                id: c0decafe-babe-4bed-b00d-feeddeadbeef
+                id: c0decafe-babe-4bed-b042-feeddeadbeef
                 user_id: Alice
                 file_name: avatar.jpg
                 mime_type: image/jpeg
@@ -154,9 +154,9 @@ paths:
                   height: 1080
                 thumbnails:
                   - size: 100x100
-                    url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef?size=100x100
+                    url: /api/v1/avatars/c0decafe-babe-4bed-b042-feeddeadbeef?size=100x100
                   - size: 300x300
-                    url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef?size=300x300
+                    url: /api/v1/avatars/c0decafe-babe-4bed-b042-feeddeadbeef?size=300x300
                 upload_status: completed
                 processing_status: completed
                 created_at: '2026-07-30T12:00:00Z'
@@ -247,9 +247,9 @@ paths:
                 $ref: '#/components/schemas/AvatarList'
               example:
                 avatars:
-                  - id: c0decafe-babe-4bed-b00d-feeddeadbeef
+                  - id: c0decafe-babe-4bed-b042-feeddeadbeef
                     user_id: Alice
-                    url: /api/v1/avatars/c0decafe-babe-4bed-b00d-feeddeadbeef
+                    url: /api/v1/avatars/c0decafe-babe-4bed-b042-feeddeadbeef
                     status: completed
                     created_at: '2026-07-30T12:00:00Z'
                 total: 1
@@ -315,7 +315,7 @@ components:
       schema:
         type: string
         format: uuid
-      example: c0decafe-babe-4bed-b00d-feeddeadbeef
+      example: c0decafe-babe-4bed-b042-feeddeadbeef
     UserID:
       name: user_id
       in: path

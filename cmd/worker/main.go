@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
-
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 	"github.com/xhrobj/gophprofile/internal/config"
@@ -45,9 +44,6 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create worker logger: %w", err)
 	}
-	defer func() {
-		_ = lg.Sync()
-	}()
 
 	pool, err := postgres.Open(ctx, cfg.DatabaseDSN)
 	if err != nil {
@@ -73,7 +69,7 @@ func run(ctx context.Context) error {
 	}
 	defer func() {
 		if closeErr := consumer.Close(); closeErr != nil {
-			lg.Warn("failed to close RabbitMQ consumer", zap.Error(closeErr))
+			lg.WarnContext(ctx, "failed to close RabbitMQ consumer", slog.Any("error", closeErr))
 		}
 	}()
 

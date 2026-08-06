@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 	"github.com/xhrobj/gophprofile/internal/config"
@@ -61,9 +61,6 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create server logger: %w", err)
 	}
-	defer func() {
-		_ = lg.Sync()
-	}()
 
 	pool, err := postgres.Open(ctx, cfg.DatabaseDSN)
 	if err != nil {
@@ -93,7 +90,7 @@ func run(ctx context.Context) error {
 	}
 	defer func() {
 		if closeErr := publisher.Close(); closeErr != nil {
-			lg.Warn("failed to close RabbitMQ publisher", zap.Error(closeErr))
+			lg.WarnContext(ctx, "failed to close RabbitMQ publisher", slog.Any("error", closeErr))
 		}
 	}()
 
@@ -106,10 +103,10 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("listen on %s: %w", cfg.HTTPAddress, err)
 	}
 
-	errorLog, err := zap.NewStdLogAt(lg.Named("net/http"), zap.ErrorLevel)
-	if err != nil {
-		return fmt.Errorf("create HTTP error logger: %w", err)
-	}
+	errorLog := slog.NewLogLogger(
+		lg.With(slog.String("logger", "net/http")).Handler(),
+		slog.LevelError,
+	)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddress,

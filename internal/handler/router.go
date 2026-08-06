@@ -1,10 +1,10 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/web"
 )
@@ -19,7 +19,7 @@ type AvatarService interface {
 
 // NewRouter создаёт HTTP-маршрутизатор Сервера с middleware и зарегистрированными маршрутами.
 func NewRouter(
-	baseLogger *zap.Logger,
+	baseLogger *slog.Logger,
 	avatarService AvatarService,
 	healthChecker healthChecker,
 	maxUploadSize int64,

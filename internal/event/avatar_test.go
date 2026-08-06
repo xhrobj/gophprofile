@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	messageID42 = "c0decafe-babe-4bed-b042-feeddeadbeef"
+	messageID42 = "deadbeef-f00d-4dad-b042-c0decafe0bad"
 	avatarID69  = "c0decafe-babe-4bed-b069-feeddeadbeef"
 )
 
@@ -27,7 +27,7 @@ func TestAvatarUploaded_JSON(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	want := `{"message_id":"c0decafe-babe-4bed-b042-feeddeadbeef","avatar_id":"c0decafe-babe-4bed-b069-feeddeadbeef","user_id":"Alice","s3_key":"originals/Alice/c0decafe-babe-4bed-b069-feeddeadbeef/avatar.png","schema_version":1,"created_at":"2026-08-04T12:00:00Z"}`
+	want := `{"message_id":"deadbeef-f00d-4dad-b042-c0decafe0bad","avatar_id":"c0decafe-babe-4bed-b069-feeddeadbeef","user_id":"Alice","s3_key":"originals/Alice/c0decafe-babe-4bed-b069-feeddeadbeef/avatar.png","schema_version":1,"created_at":"2026-08-04T12:00:00Z"}`
 	if string(encoded) != want {
 		t.Errorf("json.Marshal() = %s, want %s", encoded, want)
 	}
@@ -52,7 +52,7 @@ func TestAvatarDeleted_JSON(t *testing.T) {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 
-	want := `{"message_id":"c0decafe-babe-4bed-b042-feeddeadbeef","avatar_id":"c0decafe-babe-4bed-b069-feeddeadbeef","s3_keys":["originals/Alice/c0decafe-babe-4bed-b069-feeddeadbeef/avatar.png","thumbnails/Alice/c0decafe-babe-4bed-b069-feeddeadbeef/100x100.jpg","thumbnails/Alice/c0decafe-babe-4bed-b069-feeddeadbeef/300x300.jpg"],"schema_version":1,"created_at":"2026-08-04T12:00:00Z"}`
+	want := `{"message_id":"deadbeef-f00d-4dad-b042-c0decafe0bad","avatar_id":"c0decafe-babe-4bed-b069-feeddeadbeef","s3_keys":["originals/Alice/c0decafe-babe-4bed-b069-feeddeadbeef/avatar.png","thumbnails/Alice/c0decafe-babe-4bed-b069-feeddeadbeef/100x100.jpg","thumbnails/Alice/c0decafe-babe-4bed-b069-feeddeadbeef/300x300.jpg"],"schema_version":1,"created_at":"2026-08-04T12:00:00Z"}`
 	if string(encoded) != want {
 		t.Errorf("json.Marshal() = %s, want %s", encoded, want)
 	}

@@ -20,8 +20,8 @@ const (
 	avatarID42  = "c0decafe-babe-4bed-b042-feeddeadbeef"
 	avatarID69  = "c0decafe-babe-4bed-b069-feeddeadbeef"
 	avatarID99  = "c0decafe-babe-4bed-b099-feeddeadbeef"
-	messageID47 = "c0decafe-babe-4bed-b047-feeddeadbeef"
-	messageID77 = "c0decafe-babe-4bed-b077-feeddeadbeef"
+	messageID47 = "deadbeef-f00d-4dad-b047-c0decafe0bad"
+	messageID77 = "deadbeef-f00d-4dad-b077-c0decafe0bad"
 )
 
 func TestIntegration_PostgreSQLAvatarRepository_CreateReadAndList(t *testing.T) {
@@ -93,7 +93,7 @@ func TestIntegration_PostgreSQLAvatarRepository_CreateReadAndList(t *testing.T) 
 		)
 	}
 
-	_, err = repository.GetByID(ctx, "c0decafe-babe-4bed-b001-feeddeadbeef")
+	_, err = repository.GetByID(ctx, "c0decafe-babe-4bed-b077-feeddeadbeef")
 	if !errors.Is(err, model.ErrAvatarNotFound) {
 		t.Errorf("GetByID() missing avatar error = %v, want ErrAvatarNotFound", err)
 	}

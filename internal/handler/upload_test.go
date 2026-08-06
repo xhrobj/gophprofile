@@ -12,8 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/xhrobj/gophprofile/internal/model"
 	"github.com/xhrobj/gophprofile/internal/service"
 )
@@ -42,7 +40,7 @@ func TestUploadHandler(t *testing.T) {
 			CreatedAt: createdAt,
 		},
 	}
-	router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
+	router := NewRouter(discardLogger(), uploader, noopHealthChecker{}, testMaxUploadSize)
 	request := newMultipartUploadRequest(t, "Alice", "avatar.png", []byte("image content"))
 	response := httptest.NewRecorder()
 
@@ -98,7 +96,7 @@ func TestUploadHandler_UserID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			uploader := &fakeAvatarUploader{}
-			router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), uploader, noopHealthChecker{}, testMaxUploadSize)
 			request := newMultipartUploadRequest(t, tt.userID, "avatar.png", []byte("image content"))
 			response := httptest.NewRecorder()
 
@@ -168,7 +166,7 @@ func TestUploadHandler_MultipartRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			uploader := &fakeAvatarUploader{}
-			router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), uploader, noopHealthChecker{}, testMaxUploadSize)
 			response := httptest.NewRecorder()
 
 			router.ServeHTTP(response, tt.request(t))
@@ -193,7 +191,7 @@ func TestUploadHandler_FileName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			uploader := &fakeAvatarUploader{}
-			router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), uploader, noopHealthChecker{}, testMaxUploadSize)
 			request := newMultipartUploadRequest(t, "Alice", tt.fileName, []byte("image content"))
 			response := httptest.NewRecorder()
 
@@ -238,7 +236,7 @@ func TestUploadHandler_FileSize(t *testing.T) {
 					CreatedAt: time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC),
 				},
 			}
-			router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), uploader, noopHealthChecker{}, testMaxUploadSize)
 			request := newMultipartUploadRequest(t, "Alice", "avatar.png", make([]byte, tt.size))
 			response := httptest.NewRecorder()
 
@@ -286,7 +284,7 @@ func TestUploadHandler_ServiceError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			uploader := &fakeAvatarUploader{err: tt.uploadErr}
-			router := NewRouter(zap.NewNop(), uploader, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), uploader, noopHealthChecker{}, testMaxUploadSize)
 			request := newMultipartUploadRequest(t, "Alice", "avatar.png", []byte("image content"))
 			response := httptest.NewRecorder()
 

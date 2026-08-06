@@ -4,10 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"log/slog"
 	"net/http"
 	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/logger"
 )
@@ -61,12 +60,12 @@ func newRequestID() (string, error) {
 	return hex.EncodeToString(value), nil
 }
 
-func requestIDMiddleware(baseLogger *zap.Logger) func(http.Handler) http.Handler {
+func requestIDMiddleware(baseLogger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestID, err := newRequestID()
 			if err != nil {
-				baseLogger.Error("failed to generate request ID", zap.Error(err))
+				baseLogger.ErrorContext(r.Context(), "failed to generate request ID", slog.Any("error", err))
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
 				return
@@ -79,7 +78,7 @@ func requestIDMiddleware(baseLogger *zap.Logger) func(http.Handler) http.Handler
 	}
 }
 
-func accessLogMiddleware(baseLogger *zap.Logger) func(http.Handler) http.Handler {
+func accessLogMiddleware(baseLogger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			startedAt := time.Now()
@@ -92,12 +91,12 @@ func accessLogMiddleware(baseLogger *zap.Logger) func(http.Handler) http.Handler
 				status = http.StatusOK
 			}
 
-			logger.WithRequestID(baseLogger, RequestIDFromContext(r.Context())).Info(
+			logger.WithRequestID(baseLogger, RequestIDFromContext(r.Context())).InfoContext(r.Context(),
 				"HTTP request completed",
-				zap.String("method", r.Method),
-				zap.String("path", r.URL.Path),
-				zap.Int("status", status),
-				zap.Duration("duration", time.Since(startedAt)),
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+				slog.Int("status", status),
+				slog.Float64("duration", time.Since(startedAt).Seconds()),
 			)
 		})
 	}

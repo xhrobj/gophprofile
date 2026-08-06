@@ -120,7 +120,7 @@ make run-worker
 | `RABBITMQ_URL` | RabbitMQ URL для локальных Go-процессов | `amqp://gophprofile:password@localhost:5672/` |
 | `RABBITMQ_EXCHANGE` | direct exchange приложения | `avatars.exchange` |
 | `RABBITMQ_QUEUE` | очередь Worker | `avatars.processing` |
-| `LOG_LEVEL` | уровень Zap-логов: `debug`, `info`, `warn`, `error` | `info` |
+| `LOG_LEVEL` | уровень логов: `debug`, `info`, `warn`, `error` | `info` |
 
 При запуске внутри Compose адреса внешних зависимостей переопределяются на внутренние DNS-имена `postgres`, `minio` и `rabbitmq`.
 
@@ -268,7 +268,7 @@ RabbitMQ использует durable direct exchange и очередь с DLQ. 
 │   ├── handler/            # HTTP handlers и middleware
 │   ├── health/             # aggregate healthcheck
 │   ├── imageprocessor/     # создание миниатюр
-│   ├── logger/             # Zap logging
+│   ├── logger/             # slog logging
 │   ├── migration/          # автоматическое применение миграций
 │   ├── model/              # доменная модель
 │   ├── postgres/           # PostgreSQL repository

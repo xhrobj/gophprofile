@@ -5,10 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
-
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/logger"
 	"github.com/xhrobj/gophprofile/internal/model"
@@ -28,7 +27,7 @@ type avatarUploader interface {
 type uploadHandler struct {
 	service       avatarUploader
 	maxUploadSize int64
-	logger        *zap.Logger
+	logger        *slog.Logger
 }
 
 type uploadedFile struct {
@@ -84,9 +83,9 @@ func (h *uploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				0,
 			)
 		case errors.Is(err, service.ErrServiceUnavailable):
-			logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).Error(
+			logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).ErrorContext(r.Context(),
 				"failed to publish avatar processing event",
-				zap.Error(err),
+				slog.Any("error", err),
 			)
 			writeError(
 				w,
@@ -97,9 +96,9 @@ func (h *uploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				0,
 			)
 		default:
-			logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).Error(
+			logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).ErrorContext(r.Context(),
 				"failed to upload avatar",
-				zap.Error(err),
+				slog.Any("error", err),
 			)
 			writeError(w, r, http.StatusInternalServerError, "internal_error", "internal server error", 0)
 		}
@@ -119,7 +118,7 @@ func (h *uploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // newUploadHandler создаёт HTTP-handler загрузки аватарок.
-func newUploadHandler(avatarService avatarUploader, maxUploadSize int64, baseLogger *zap.Logger) *uploadHandler {
+func newUploadHandler(avatarService avatarUploader, maxUploadSize int64, baseLogger *slog.Logger) *uploadHandler {
 	return &uploadHandler{
 		service:       avatarService,
 		maxUploadSize: maxUploadSize,

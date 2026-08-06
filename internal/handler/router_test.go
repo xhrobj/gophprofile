@@ -6,13 +6,12 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/xhrobj/gophprofile/internal/model"
 	"github.com/xhrobj/gophprofile/internal/service"
@@ -25,13 +24,8 @@ func TestRouter_RequestID(t *testing.T) {
 		name              string
 		incomingRequestID string
 	}{
-		{
-			name: "generates request ID",
-		},
-		{
-			name:              "replaces incoming request ID",
-			incomingRequestID: "external-request-id",
-		},
+		{name: "generates request ID"},
+		{name: "replaces incoming request ID", incomingRequestID: "external-request-id"},
 	}
 
 	for _, tt := range tests {
@@ -91,7 +85,7 @@ func TestRouter_Web(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			router := NewRouter(zap.NewNop(), noopAvatarService{}, noopHealthChecker{}, 10<<20)
+			router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 
@@ -151,14 +145,14 @@ func (noopAvatarService) DeleteCurrentByUserID(context.Context, string, string) 
 	return nil
 }
 
-func testLogger(output *bytes.Buffer) *zap.Logger {
-	core := zapcore.NewCore(
-		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
-		zapcore.AddSync(output),
-		zapcore.DebugLevel,
+func testLogger(output *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(output, &slog.HandlerOptions{Level: slog.LevelDebug})).With(
+		slog.String("service", "server"),
 	)
+}
 
-	return zap.New(core).With(zap.String("service", "server"))
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func decodeLogEntry(t *testing.T, output *bytes.Buffer) map[string]any {

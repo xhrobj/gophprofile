@@ -3,11 +3,11 @@ package handler
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/logger"
 	"github.com/xhrobj/gophprofile/internal/model"
@@ -20,7 +20,7 @@ type avatarMetadataReader interface {
 
 type metadataHandler struct {
 	service avatarMetadataReader
-	logger  *zap.Logger
+	logger  *slog.Logger
 }
 
 type dimensionsResponse struct {
@@ -55,7 +55,7 @@ type avatarListResponse struct {
 	Total   int                    `json:"total"`
 }
 
-func newMetadataHandler(avatarService avatarMetadataReader, baseLogger *zap.Logger) *metadataHandler {
+func newMetadataHandler(avatarService avatarMetadataReader, baseLogger *slog.Logger) *metadataHandler {
 	return &metadataHandler{service: avatarService, logger: baseLogger}
 }
 
@@ -109,7 +109,7 @@ func (h *metadataHandler) writeReadError(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).Error(message, zap.Error(err))
+	logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).ErrorContext(r.Context(), message, slog.Any("error", err))
 	writeError(w, r, http.StatusInternalServerError, "internal_error", "internal server error", 0)
 }
 

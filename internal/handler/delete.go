@@ -3,10 +3,10 @@ package handler
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/logger"
 	"github.com/xhrobj/gophprofile/internal/model"
@@ -20,10 +20,10 @@ type avatarDeleter interface {
 
 type deleteHandler struct {
 	service avatarDeleter
-	logger  *zap.Logger
+	logger  *slog.Logger
 }
 
-func newDeleteHandler(avatarService avatarDeleter, baseLogger *zap.Logger) *deleteHandler {
+func newDeleteHandler(avatarService avatarDeleter, baseLogger *slog.Logger) *deleteHandler {
 	return &deleteHandler{service: avatarService, logger: baseLogger}
 }
 
@@ -77,15 +77,15 @@ func (h *deleteHandler) writeDeleteError(w http.ResponseWriter, r *http.Request,
 	case errors.Is(err, model.ErrAvatarNotFound):
 		writeError(w, r, http.StatusNotFound, "avatar_not_found", "avatar not found", 0)
 	case errors.Is(err, service.ErrServiceUnavailable):
-		logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).Error(
+		logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).ErrorContext(r.Context(),
 			"failed to publish avatar deletion event",
-			zap.Error(err),
+			slog.Any("error", err),
 		)
 		writeError(w, r, http.StatusServiceUnavailable, "service_unavailable", "service temporarily unavailable", 0)
 	default:
-		logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).Error(
+		logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).ErrorContext(r.Context(),
 			"failed to delete avatar",
-			zap.Error(err),
+			slog.Any("error", err),
 		)
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "internal server error", 0)
 	}

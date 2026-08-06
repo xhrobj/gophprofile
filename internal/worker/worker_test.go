@@ -6,11 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"reflect"
 	"testing"
 	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/broker"
 	"github.com/xhrobj/gophprofile/internal/event"
@@ -21,7 +20,7 @@ import (
 
 const (
 	testAvatarID  = "c0decafe-babe-4bed-b042-feeddeadbeef"
-	testMessageID = "c0decafe-babe-4bed-b043-feeddeadbeef"
+	testMessageID = "deadbeef-f00d-4dad-b042-c0decafe0bad"
 )
 
 type fakeConsumer struct{}
@@ -78,7 +77,7 @@ type fakeImageProcessor struct {
 }
 
 func TestWorker_Run_StopsOnContextCancellation(t *testing.T) {
-	lg := zap.NewNop()
+	lg := discardLogger()
 	consumer := &fakeConsumer{}
 	avatarWorker := New(consumer, nil, nil, nil, lg)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -754,8 +753,12 @@ func (f *fakeImageProcessor) Process(io.Reader) ([]imageprocessor.Thumbnail, err
 	return f.thumbnails, f.err
 }
 
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
 func newTestWorker(repository Repository, storage Storage, processor ImageProcessor) *Worker {
-	avatarWorker := New(&fakeConsumer{}, repository, storage, processor, zap.NewNop())
+	avatarWorker := New(&fakeConsumer{}, repository, storage, processor, discardLogger())
 	avatarWorker.retry = retryPolicy{
 		maxAttempts:    maxRetryAttempts,
 		initialBackoff: 0,
