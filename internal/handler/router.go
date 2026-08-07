@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/xhrobj/gophprofile/web"
 )
@@ -26,6 +27,8 @@ func NewRouter(
 ) http.Handler {
 	router := chi.NewRouter()
 
+	router.Use(otelhttp.NewMiddleware("HTTP", otelhttp.WithSpanNameFormatter(httpSpanName)))
+	router.Use(traceRouteMiddleware)
 	router.Use(requestIDMiddleware(baseLogger))
 	router.Use(accessLogMiddleware(baseLogger))
 
@@ -52,4 +55,8 @@ func NewRouter(
 	router.Get("/api/v1/users/{userID}/avatars", metadata.listByUserID)
 
 	return router
+}
+
+func httpSpanName(_ string, r *http.Request) string {
+	return r.Method
 }

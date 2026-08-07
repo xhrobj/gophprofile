@@ -3,10 +3,13 @@ package logger
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"strings"
 	"testing"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestNew(t *testing.T) {
@@ -82,8 +85,18 @@ func TestContextFields(t *testing.T) {
 		t.Fatalf("newLogger() error = %v", err)
 	}
 
-	lg.Info("hidden")
-	WithMessageID(WithRequestID(lg, "faceb00cf00dfeeddeadbeefc0decafe"), "deadbeef-f00d-4dad-b042-c0decafe0bad").Warn("visible")
+	traceID := trace.TraceID{
+		0xc0, 0xde, 0xca, 0xfe, 0xba, 0xbe, 0x4b, 0xed,
+		0xb0, 0x42, 0xfe, 0xed, 0xde, 0xad, 0xbe, 0xef,
+	}
+	spanID := trace.SpanID{0xde, 0xad, 0xbe, 0xef, 0xc0, 0xde, 0xca, 0xfe}
+	spanContext := trace.NewSpanContext(trace.SpanContextConfig{TraceID: traceID, SpanID: spanID})
+	ctx := trace.ContextWithSpanContext(context.Background(), spanContext)
+
+	lg.InfoContext(ctx, "hidden")
+	requestLogger := WithRequestID(lg, "faceb00cf00dfeeddeadbeefc0decafe")
+	messageLogger := WithMessageID(requestLogger, "deadbeef-f00d-4dad-b042-c0decafe0bad")
+	messageLogger.WarnContext(ctx, "visible")
 
 	scanner := bufio.NewScanner(&output)
 	if !scanner.Scan() {
@@ -100,6 +113,8 @@ func TestContextFields(t *testing.T) {
 	assertLogField(t, entry, serviceKey, "server")
 	assertLogField(t, entry, requestIDKey, "faceb00cf00dfeeddeadbeefc0decafe")
 	assertLogField(t, entry, messageIDKey, "deadbeef-f00d-4dad-b042-c0decafe0bad")
+	assertLogField(t, entry, traceIDKey, traceID.String())
+	assertLogField(t, entry, spanIDKey, spanID.String())
 
 	if scanner.Scan() {
 		t.Errorf("unexpected extra log entry: %s", scanner.Text())

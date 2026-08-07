@@ -8,6 +8,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/xhrobj/gophprofile/internal/logger"
 )
 
@@ -58,6 +62,21 @@ func newRequestID() (string, error) {
 	}
 
 	return hex.EncodeToString(value), nil
+}
+
+func traceRouteMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+
+		routePattern := chi.RouteContext(r.Context()).RoutePattern()
+		if routePattern == "" {
+			return
+		}
+
+		span := trace.SpanFromContext(r.Context())
+		span.SetName(r.Method + " " + routePattern)
+		span.SetAttributes(attribute.String("http.route", routePattern))
+	})
 }
 
 func requestIDMiddleware(baseLogger *slog.Logger) func(http.Handler) http.Handler {

@@ -13,6 +13,11 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/xhrobj/gophprofile/internal/model"
 	"github.com/xhrobj/gophprofile/internal/service"
 )
@@ -70,6 +75,46 @@ func TestRouter_RequestID(t *testing.T) {
 				t.Error("log entry has no duration field")
 			}
 		})
+	}
+}
+
+func TestRouter_Tracing(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	spanRecorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20)
+	request := httptest.NewRequest(http.MethodGet, "/web/gallery/Alice", nil)
+	request.Header.Set("traceparent", "00-c0decafebabe4bedb042feeddeadbeef-deadbeefc0decafe-01")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Errorf("response status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	spans := spanRecorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	span := spans[0]
+	if got := span.Name(); got != "GET /web/gallery/{userID}" {
+		t.Errorf("span name = %q, want %q", got, "GET /web/gallery/{userID}")
+	}
+	if got := span.SpanContext().TraceID().String(); got != "c0decafebabe4bedb042feeddeadbeef" {
+		t.Errorf("trace ID = %q, want propagated trace ID", got)
+	}
+	if got := spanAttribute(span, "http.route"); got != "/web/gallery/{userID}" {
+		t.Errorf("http.route = %q, want %q", got, "/web/gallery/{userID}")
 	}
 }
 
@@ -200,4 +245,14 @@ func assertEntryNumber(t *testing.T, entry map[string]any, key string, want int)
 	if got != float64(want) {
 		t.Errorf("log field %q = %#v, want %d", key, got, want)
 	}
+}
+
+func spanAttribute(span sdktrace.ReadOnlySpan, key string) string {
+	for _, attr := range span.Attributes() {
+		if string(attr.Key) == key {
+			return attr.Value.AsString()
+		}
+	}
+
+	return ""
 }
