@@ -77,7 +77,7 @@ infra-down:
 
 # удалить контейнеры, сети и локальные данные Docker Compose
 infra-erase:
-	docker compose down -v
+	docker compose --profile observability down -v
 
 # собрать и запустить Сервер
 run-server: infra-up build-server
@@ -88,17 +88,17 @@ run-worker: infra-up build-worker
 	$(WORKER)
 
 # собрать и запустить полный локальный стек приложения:
-# MinIO (S3), PostgreSQL, RabbitMQ, Сервер и Воркер через Docker Compose
+# MinIO (S3), PostgreSQL, RabbitMQ, Сервер, Воркер и Jaeger через Docker Compose
 compose-up:
-	docker compose up -d --build --wait
+	docker compose --profile observability up -d --build --wait
 
 # остановить и удалить контейнеры и сети Docker Compose без удаления данных
 compose-down:
-	docker compose down
+	docker compose --profile observability down
 
 # показать логи сервисов Docker Compose
 compose-logs:
-	docker compose logs -f
+	docker compose --profile observability logs -f
 
 # запустить обычные и интеграционные тесты
 test-all: test-race test-integration
