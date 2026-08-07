@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
@@ -43,11 +44,32 @@ func TestNewTracing_Validation(t *testing.T) {
 		name        string
 		serviceName string
 		endpoint    string
+		want        string
 	}{
-		{name: "empty service name", serviceName: "  ", endpoint: "http://localhost:4318"},
-		{name: "missing endpoint scheme", serviceName: "server", endpoint: "localhost:4318"},
-		{name: "unsupported endpoint scheme", serviceName: "server", endpoint: "ftp://localhost:4318"},
-		{name: "endpoint with query", serviceName: "server", endpoint: "http://localhost:4318?debug=true"},
+		{
+			name:        "empty service name",
+			serviceName: "  ",
+			endpoint:    "http://localhost:4318",
+			want:        "service name",
+		},
+		{
+			name:        "missing endpoint scheme",
+			serviceName: "server",
+			endpoint:    "localhost:4318",
+			want:        "OTLP endpoint",
+		},
+		{
+			name:        "unsupported endpoint scheme",
+			serviceName: "server",
+			endpoint:    "ftp://localhost:4318",
+			want:        "OTLP endpoint",
+		},
+		{
+			name:        "endpoint with query",
+			serviceName: "server",
+			endpoint:    "http://localhost:4318?debug=true",
+			want:        "OTLP endpoint",
+		},
 	}
 
 	for _, tt := range tests {
@@ -55,6 +77,9 @@ func TestNewTracing_Validation(t *testing.T) {
 			_, err := NewTracing(context.Background(), tt.serviceName, tt.endpoint, true)
 			if err == nil {
 				t.Fatal("NewTracing() error = nil, want validation error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("NewTracing() error = %q, want %q", err, tt.want)
 			}
 		})
 	}

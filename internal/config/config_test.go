@@ -181,7 +181,6 @@ func TestLoadWorker_TracingDisabledWithoutOTLPEndpoint(t *testing.T) {
 func setValidEnvironment(t *testing.T) {
 	t.Helper()
 
-	t.Setenv(envHTTPAddress, ":8080")
 	t.Setenv(envDatabaseDSN, "postgres://gophprofile:gophprofile@localhost:5432/gophprofile?sslmode=disable")
 
 	t.Setenv(envS3Endpoint, "localhost:9000")
@@ -194,9 +193,12 @@ func setValidEnvironment(t *testing.T) {
 	t.Setenv(envRabbitMQExchange, "avatars.exchange")
 	t.Setenv(envRabbitMQQueue, "avatars.processing")
 
-	t.Setenv(envMaxUploadSize, "10485760")
-	t.Setenv(envLogLevel, "info")
 	t.Setenv(envTracingEnabled, "true")
 	t.Setenv(envOTLPEndpoint, "http://localhost:4318")
+
+	t.Setenv(envHTTPAddress, ":8080")
+	t.Setenv(envMaxUploadSize, "10485760")
 	t.Setenv(envShutdownTimeout, "10s")
+
+	t.Setenv(envLogLevel, "info")
 }

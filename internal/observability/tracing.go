@@ -1,4 +1,3 @@
-// Package observability настраивает инфраструктуру наблюдаемости приложения.
 package observability
 
 import (
