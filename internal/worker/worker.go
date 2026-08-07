@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
 
 	"github.com/xhrobj/gophprofile/internal/broker"
 	"github.com/xhrobj/gophprofile/internal/event"
@@ -23,9 +24,10 @@ import (
 )
 
 const (
-	maxRetryAttempts    = 3
-	initialRetryBackoff = 250 * time.Millisecond
-	recoveryTimeout     = 2 * time.Second
+	workerInstrumentationName = "github.com/xhrobj/gophprofile/internal/worker"
+	maxRetryAttempts          = 3
+	initialRetryBackoff       = 250 * time.Millisecond
+	recoveryTimeout           = 2 * time.Second
 )
 
 // Repository хранит состояние фоновой обработки аватаров.
@@ -126,6 +128,9 @@ func (w *Worker) handleAvatarUploadedDelivery(ctx context.Context, item broker.D
 	if err != nil {
 		return w.rejectInvalidMessage(ctx, item, err)
 	}
+
+	ctx, span := otel.Tracer(workerInstrumentationName).Start(ctx, "process uploaded avatar")
+	defer span.End()
 
 	messageLogger := logger.WithMessageID(w.logger, message.MessageID).With(
 		slog.String("avatar_id", message.AvatarID),
@@ -237,6 +242,9 @@ func (w *Worker) handleAvatarDeletedDelivery(ctx context.Context, item broker.De
 	if err != nil {
 		return w.rejectInvalidMessage(ctx, item, err)
 	}
+
+	ctx, span := otel.Tracer(workerInstrumentationName).Start(ctx, "process deleted avatar")
+	defer span.End()
 
 	messageLogger := logger.WithMessageID(w.logger, message.MessageID).With(
 		slog.String("avatar_id", message.AvatarID),

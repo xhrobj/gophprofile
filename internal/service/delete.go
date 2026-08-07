@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/xhrobj/gophprofile/internal/model"
 )
 
@@ -13,6 +15,9 @@ const deleteRollbackTimeout = 2 * time.Second
 
 // DeleteByID мягко удаляет аватарку по идентификатору и ставит очистку файлов в очередь.
 func (s *AvatarService) DeleteByID(ctx context.Context, avatarID, requesterUserID string) error {
+	ctx, span := otel.Tracer(serviceInstrumentationName).Start(ctx, "delete avatar")
+	defer span.End()
+
 	avatar, err := s.repository.GetByID(ctx, avatarID)
 	if err != nil {
 		return fmt.Errorf("get avatar for deletion: %w", err)
@@ -23,6 +28,9 @@ func (s *AvatarService) DeleteByID(ctx context.Context, avatarID, requesterUserI
 
 // DeleteCurrentByUserID мягко удаляет актуальную аватарку пользователя и ставит очистку файлов в очередь.
 func (s *AvatarService) DeleteCurrentByUserID(ctx context.Context, userID, requesterUserID string) error {
+	ctx, span := otel.Tracer(serviceInstrumentationName).Start(ctx, "delete avatar")
+	defer span.End()
+
 	if userID != requesterUserID {
 		return ErrForbidden
 	}

@@ -8,10 +8,15 @@ import (
 	"io"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/xhrobj/gophprofile/internal/model"
 )
 
-const uploadRecoveryTimeout = 2 * time.Second
+const (
+	serviceInstrumentationName = "github.com/xhrobj/gophprofile/internal/service"
+	uploadRecoveryTimeout      = 2 * time.Second
+)
 
 // AvatarRepository описывает операции с метаданными аватаров, необходимые application-сервису.
 type AvatarRepository interface {
@@ -79,6 +84,9 @@ func NewAvatarService(
 
 // Upload создаёт метаданные аватарки, сохраняет оригинал и публикует событие для фоновой обработки.
 func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (model.Avatar, error) {
+	ctx, span := otel.Tracer(serviceInstrumentationName).Start(ctx, "upload avatar")
+	defer span.End()
+
 	metadata, err := inspectImage(input.Content)
 	if err != nil {
 		return model.Avatar{}, fmt.Errorf("inspect avatar image: %w", err)
