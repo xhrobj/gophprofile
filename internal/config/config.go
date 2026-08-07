@@ -145,7 +145,7 @@ func loadCommon() (Common, error) {
 		return Common{}, err
 	}
 
-	tracingEnabled, err := optionalBoolean(envTracingEnabled)
+	tracingEnabled, err := optionalBoolean(envTracingEnabled, true)
 	if err != nil {
 		return Common{}, err
 	}
@@ -209,10 +209,10 @@ func boolean(name string) (bool, error) {
 	return parsed, nil
 }
 
-func optionalBoolean(name string) (bool, error) {
+func optionalBoolean(name string, defaultValue bool) (bool, error) {
 	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {
-		return false, nil
+		return defaultValue, nil
 	}
 
 	parsed, err := strconv.ParseBool(value)

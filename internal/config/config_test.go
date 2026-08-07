@@ -164,9 +164,22 @@ func TestLoadWorker_TracingRequiresOTLPEndpoint(t *testing.T) {
 	}
 }
 
-func TestLoadWorker_TracingDisabledWithoutOTLPEndpoint(t *testing.T) {
+func TestLoadWorker_TracingEnabledByDefault(t *testing.T) {
 	setValidEnvironment(t)
 	t.Setenv(envTracingEnabled, "")
+
+	got, err := LoadWorker()
+	if err != nil {
+		t.Fatalf("LoadWorker() error = %v", err)
+	}
+	if !got.TracingEnabled {
+		t.Error("LoadWorker() tracing enabled = false, want true")
+	}
+}
+
+func TestLoadWorker_TracingDisabledWithoutOTLPEndpoint(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv(envTracingEnabled, "false")
 	t.Setenv(envOTLPEndpoint, "")
 
 	got, err := LoadWorker()
