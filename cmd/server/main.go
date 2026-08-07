@@ -21,6 +21,7 @@ import (
 	"github.com/xhrobj/gophprofile/internal/health"
 	"github.com/xhrobj/gophprofile/internal/logger"
 	"github.com/xhrobj/gophprofile/internal/migration"
+	"github.com/xhrobj/gophprofile/internal/observability"
 	"github.com/xhrobj/gophprofile/internal/postgres"
 	"github.com/xhrobj/gophprofile/internal/s3"
 	"github.com/xhrobj/gophprofile/internal/server"
@@ -61,6 +62,19 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create server logger: %w", err)
 	}
+
+	tracing, err := observability.NewTracing(ctx, serviceName, cfg.OTLPEndpoint, cfg.TracingEnabled)
+	if err != nil {
+		return fmt.Errorf("create server tracing: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+
+		if shutdownErr := tracing.Shutdown(shutdownCtx); shutdownErr != nil {
+			lg.WarnContext(shutdownCtx, "failed to shutdown tracing", slog.Any("error", shutdownErr))
+		}
+	}()
 
 	pool, err := postgres.Open(ctx, cfg.DatabaseDSN)
 	if err != nil {

@@ -8,6 +8,8 @@ x-app-environment: &app-environment
   RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
   RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE}
   RABBITMQ_QUEUE: ${RABBITMQ_QUEUE}
+  TRACING_ENABLED: ${TRACING_ENABLED}
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
   LOG_LEVEL: ${LOG_LEVEL}
 
 services:
@@ -49,6 +51,15 @@ services:
       rabbitmq:
         condition: service_healthy
     stop_grace_period: 15s
+
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0
+    container_name: gophprofile-jaeger
+    profiles:
+      - observability
+    ports:
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:16686:16686"
 
   postgres:
     image: postgres:17.10
