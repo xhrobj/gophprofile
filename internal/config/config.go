@@ -46,8 +46,9 @@ type Common struct {
 	RabbitMQExchange string
 	RabbitMQQueue    string
 
-	TracingEnabled bool
-	OTLPEndpoint   string
+	TracingEnabled  bool
+	OTLPEndpoint    string
+	ShutdownTimeout time.Duration
 
 	LogLevel string
 }
@@ -55,9 +56,8 @@ type Common struct {
 // Server содержит конфигурацию HTTP-сервера.
 type Server struct {
 	Common
-	HTTPAddress     string
-	MaxUploadSize   int64
-	ShutdownTimeout time.Duration
+	HTTPAddress   string
+	MaxUploadSize int64
 }
 
 // Worker содержит конфигурацию фонового воркера.
@@ -82,16 +82,10 @@ func LoadServer() (Server, error) {
 		return Server{}, err
 	}
 
-	shutdownTimeout, err := positiveDuration(envShutdownTimeout)
-	if err != nil {
-		return Server{}, err
-	}
-
 	return Server{
-		Common:          common,
-		HTTPAddress:     httpAddress,
-		MaxUploadSize:   maxUploadSize,
-		ShutdownTimeout: shutdownTimeout,
+		Common:        common,
+		HTTPAddress:   httpAddress,
+		MaxUploadSize: maxUploadSize,
 	}, nil
 }
 
@@ -161,6 +155,11 @@ func loadCommon() (Common, error) {
 		return Common{}, fmt.Errorf("environment variable %s is required when tracing is enabled", envOTLPEndpoint)
 	}
 
+	shutdownTimeout, err := positiveDuration(envShutdownTimeout)
+	if err != nil {
+		return Common{}, err
+	}
+
 	logLevel, err := logLevel()
 	if err != nil {
 		return Common{}, err
@@ -179,8 +178,9 @@ func loadCommon() (Common, error) {
 		RabbitMQExchange: rabbitMQExchange,
 		RabbitMQQueue:    rabbitMQQueue,
 
-		TracingEnabled: tracingEnabled,
-		OTLPEndpoint:   otlpExporterEndpoint,
+		TracingEnabled:  tracingEnabled,
+		OTLPEndpoint:    otlpExporterEndpoint,
+		ShutdownTimeout: shutdownTimeout,
 
 		LogLevel: logLevel,
 	}, nil

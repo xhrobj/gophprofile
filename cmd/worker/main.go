@@ -14,6 +14,7 @@ import (
 	"github.com/xhrobj/gophprofile/internal/config"
 	"github.com/xhrobj/gophprofile/internal/imageprocessor"
 	"github.com/xhrobj/gophprofile/internal/logger"
+	"github.com/xhrobj/gophprofile/internal/observability"
 	"github.com/xhrobj/gophprofile/internal/postgres"
 	"github.com/xhrobj/gophprofile/internal/s3"
 	"github.com/xhrobj/gophprofile/internal/worker"
@@ -44,6 +45,19 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create worker logger: %w", err)
 	}
+
+	tracing, err := observability.NewTracing(ctx, serviceName, cfg.OTLPEndpoint, cfg.TracingEnabled)
+	if err != nil {
+		return fmt.Errorf("create worker tracing: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+
+		if shutdownErr := tracing.Shutdown(shutdownCtx); shutdownErr != nil {
+			lg.WarnContext(shutdownCtx, "failed to shutdown tracing", slog.Any("error", shutdownErr))
+		}
+	}()
 
 	pool, err := postgres.Open(ctx, cfg.DatabaseDSN)
 	if err != nil {

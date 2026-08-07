@@ -10,6 +10,7 @@ x-app-environment: &app-environment
   RABBITMQ_QUEUE: ${RABBITMQ_QUEUE}
   TRACING_ENABLED: ${TRACING_ENABLED}
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT}
   LOG_LEVEL: ${LOG_LEVEL}
 
 services:
@@ -23,7 +24,6 @@ services:
       <<: *app-environment
       HTTP_ADDRESS: :8080
       MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE}
-      SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -50,7 +50,7 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    stop_grace_period: 15s
+    stop_grace_period: 30s
 
   jaeger:
     image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0

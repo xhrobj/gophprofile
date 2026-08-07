@@ -29,14 +29,14 @@ func TestLoadServer(t *testing.T) {
 			RabbitMQExchange: "avatars.exchange",
 			RabbitMQQueue:    "avatars.processing",
 
-			TracingEnabled: true,
-			OTLPEndpoint:   "http://localhost:4318",
+			TracingEnabled:  true,
+			OTLPEndpoint:    "http://localhost:4318",
+			ShutdownTimeout: 10 * time.Second,
 
 			LogLevel: "warn",
 		},
-		HTTPAddress:     ":8080",
-		MaxUploadSize:   10 * 1024 * 1024,
-		ShutdownTimeout: 10 * time.Second,
+		HTTPAddress:   ":8080",
+		MaxUploadSize: 10 * 1024 * 1024,
 	}
 
 	if got != want {
@@ -48,7 +48,6 @@ func TestLoadWorker(t *testing.T) {
 	setValidEnvironment(t)
 	t.Setenv(envHTTPAddress, "")
 	t.Setenv(envMaxUploadSize, "")
-	t.Setenv(envShutdownTimeout, "")
 
 	got, err := LoadWorker()
 	if err != nil {
@@ -69,8 +68,9 @@ func TestLoadWorker(t *testing.T) {
 			RabbitMQExchange: "avatars.exchange",
 			RabbitMQQueue:    "avatars.processing",
 
-			TracingEnabled: true,
-			OTLPEndpoint:   "http://localhost:4318",
+			TracingEnabled:  true,
+			OTLPEndpoint:    "http://localhost:4318",
+			ShutdownTimeout: 10 * time.Second,
 
 			LogLevel: "info",
 		},
@@ -129,6 +129,9 @@ func TestLoadWorker_Validation(t *testing.T) {
 		{name: "missing RabbitMQ exchange", envName: envRabbitMQExchange, value: ""},
 		{name: "missing RabbitMQ queue", envName: envRabbitMQQueue, value: ""},
 		{name: "invalid tracing flag", envName: envTracingEnabled, value: "sometimes"},
+		{name: "missing shutdown timeout", envName: envShutdownTimeout, value: ""},
+		{name: "invalid shutdown timeout", envName: envShutdownTimeout, value: "soon"},
+		{name: "zero shutdown timeout", envName: envShutdownTimeout, value: "0s"},
 		{name: "unknown log level", envName: envLogLevel, value: "trace"},
 	}
 
