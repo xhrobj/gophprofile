@@ -14,6 +14,9 @@ import (
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/xhrobj/gophprofile/internal/broker"
 	"github.com/xhrobj/gophprofile/internal/event"
@@ -113,6 +116,22 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error {
+	ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(item.Headers()))
+	ctx, span := otel.Tracer(workerInstrumentationName).Start(
+		ctx,
+		"process "+item.RoutingKey(),
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "rabbitmq"),
+			attribute.String("messaging.destination.name", item.RoutingKey()),
+			attribute.String("messaging.operation.name", "process"),
+			attribute.String("messaging.operation.type", "process"),
+			attribute.String("messaging.rabbitmq.destination.routing_key", item.RoutingKey()),
+			attribute.String("messaging.message.id", item.MessageID()),
+		),
+	)
+	defer span.End()
+
 	switch item.RoutingKey() {
 	case event.AvatarUploadedRoutingKey:
 		return w.handleAvatarUploadedDelivery(ctx, item)

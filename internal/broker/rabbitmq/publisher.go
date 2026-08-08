@@ -10,12 +10,20 @@ import (
 
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/xhrobj/gophprofile/internal/event"
 	"github.com/xhrobj/gophprofile/internal/model"
 )
 
-const publisherConfirmTimeout = 5 * time.Second
+const (
+	publisherConfirmTimeout     = 5 * time.Second
+	rabbitMQInstrumentationName = "github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
+)
+
+type amqpTableCarrier amqp.Table
 
 // Publisher публикует события аватаров в RabbitMQ с publisher confirms.
 type Publisher struct {
@@ -125,6 +133,28 @@ func (p *Publisher) Close() error {
 	return resultErr
 }
 
+func (c amqpTableCarrier) Get(key string) string {
+	value, ok := c[key].(string)
+	if !ok {
+		return ""
+	}
+
+	return value
+}
+
+func (c amqpTableCarrier) Set(key, value string) {
+	c[key] = value
+}
+
+func (c amqpTableCarrier) Keys() []string {
+	keys := make([]string, 0, len(c))
+	for key := range c {
+		keys = append(keys, key)
+	}
+
+	return keys
+}
+
 func (p *Publisher) publish(
 	ctx context.Context,
 	routingKey string,
@@ -137,6 +167,25 @@ func (p *Publisher) publish(
 		return fmt.Errorf("marshal %s event: %w", routingKey, err)
 	}
 
+	destination := p.exchange + ":" + routingKey
+	ctx, span := otel.Tracer(rabbitMQInstrumentationName).Start(
+		ctx,
+		"send "+destination,
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "rabbitmq"),
+			attribute.String("messaging.destination.name", destination),
+			attribute.String("messaging.operation.name", "send"),
+			attribute.String("messaging.operation.type", "send"),
+			attribute.String("messaging.rabbitmq.destination.routing_key", routingKey),
+			attribute.String("messaging.message.id", messageID),
+		),
+	)
+	defer span.End()
+
+	headers := amqp.Table{}
+	otel.GetTextMapPropagator().Inject(ctx, amqpTableCarrier(headers))
+
 	p.mu.Lock()
 	confirmCtx, cancel := context.WithTimeout(ctx, publisherConfirmTimeout)
 	confirmation, err := p.channel.PublishWithDeferredConfirmWithContext(
@@ -146,6 +195,7 @@ func (p *Publisher) publish(
 		false,
 		false,
 		amqp.Publishing{
+			Headers:      headers,
 			ContentType:  "application/json",
 			DeliveryMode: amqp.Persistent,
 			MessageId:    messageID,

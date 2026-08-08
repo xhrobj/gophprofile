@@ -27,6 +27,7 @@ type fakeConsumer struct{}
 
 type fakeDelivery struct {
 	body        []byte
+	headers     map[string]string
 	messageID   string
 	routingKey  string
 	redelivered bool
@@ -641,6 +642,10 @@ func (*fakeConsumer) Consume(ctx context.Context) (<-chan broker.Delivery, error
 
 func (f *fakeDelivery) Body() []byte {
 	return f.body
+}
+
+func (f *fakeDelivery) Headers() map[string]string {
+	return f.headers
 }
 
 func (f *fakeDelivery) MessageID() string {
