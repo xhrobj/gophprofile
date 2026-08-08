@@ -73,7 +73,7 @@ infra-up: db-up s3-up rabbitmq-up
 
 # остановить контейнеры локальной инфраструктуры
 infra-down:
-	docker compose --profile observability stop postgres minio rabbitmq jaeger
+	docker compose --profile observability stop postgres minio rabbitmq jaeger prometheus
 
 # удалить контейнеры, сети и локальные данные Docker Compose
 infra-erase:
@@ -90,7 +90,7 @@ run-worker: infra-up build-worker
 	$(WORKER)
 
 # собрать и запустить полный локальный стек приложения:
-# MinIO (S3), PostgreSQL, RabbitMQ, Сервер, Воркер и Jaeger через Docker Compose
+# MinIO (S3), PostgreSQL, RabbitMQ, Сервер, Воркер, Jaeger и Prometheus через Docker Compose
 compose-up:
 	docker compose --profile observability up -d --build --wait
 

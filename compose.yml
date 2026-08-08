@@ -64,6 +64,24 @@ services:
       - "127.0.0.1:4318:4318"
       - "127.0.0.1:16686:16686"
 
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    container_name: gophprofile-prometheus
+    profiles:
+      - observability
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   postgres:
     image: postgres:17.10
     container_name: gophprofile-postgres
@@ -130,3 +148,4 @@ volumes:
   postgres-data:
   minio-data:
   rabbitmq-data:
+  prometheus-data:
