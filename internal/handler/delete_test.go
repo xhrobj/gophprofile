@@ -45,7 +45,7 @@ func TestDeleteHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAvatarDeleter{}
-			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodDelete, tt.path, nil)
 			request.Header.Set(userIDHeader, "Alice")
 			response := httptest.NewRecorder()
@@ -102,7 +102,7 @@ func TestDeleteHandler_Validation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAvatarDeleter{}
-			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodDelete, tt.path, nil)
 			if tt.userID != "" {
 				request.Header.Set(userIDHeader, tt.userID)
@@ -155,7 +155,7 @@ func TestDeleteHandler_Error(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAvatarDeleter{deleteByIDErr: tt.err}
-			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodDelete, "/api/v1/avatars/"+testAvatarID, nil)
 			request.Header.Set(userIDHeader, "Alice")
 			response := httptest.NewRecorder()

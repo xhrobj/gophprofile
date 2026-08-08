@@ -109,7 +109,7 @@ func TestTraceEndpoint(t *testing.T) {
 	}
 }
 
-func TestTracing_DropsHealthCheckTrace(t *testing.T) {
+func TestTracing_DropsTelemetryNoise(t *testing.T) {
 	preserveGlobals(t)
 
 	res, err := traceResource("server")
@@ -121,14 +121,16 @@ func TestTracing_DropsHealthCheckTrace(t *testing.T) {
 	tracing := installTracing(res, exporter)
 	tracer := otel.Tracer("test")
 
-	healthCtx, healthSpan := tracer.Start(
-		context.Background(),
-		"GET",
-		oteltrace.WithAttributes(semconv.URLPath("/health")),
-	)
-	_, healthChild := tracer.Start(healthCtx, "HTTP HEAD")
-	healthChild.End()
-	healthSpan.End()
+	for _, path := range []string{"/health", "/metrics"} {
+		noiseCtx, noiseSpan := tracer.Start(
+			context.Background(),
+			"GET",
+			oteltrace.WithAttributes(semconv.URLPath(path)),
+		)
+		_, noiseChild := tracer.Start(noiseCtx, "HTTP HEAD")
+		noiseChild.End()
+		noiseSpan.End()
+	}
 
 	requestCtx, requestSpan := tracer.Start(
 		context.Background(),
@@ -149,7 +151,7 @@ func TestTracing_DropsHealthCheckTrace(t *testing.T) {
 
 	for _, span := range exporter.spans {
 		if span.Name() == "GET" || span.Name() == "HTTP HEAD" {
-			t.Errorf("health-check span %q was exported", span.Name())
+			t.Errorf("telemetry-noise span %q was exported", span.Name())
 		}
 	}
 }

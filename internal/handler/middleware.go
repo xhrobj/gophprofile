@@ -97,6 +97,29 @@ func requestIDMiddleware(baseLogger *slog.Logger) func(http.Handler) http.Handle
 	}
 }
 
+func httpMetricsMiddleware(metrics HTTPMetrics) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			startedAt := time.Now()
+			writer := &responseWriter{ResponseWriter: w}
+
+			next.ServeHTTP(writer, r)
+
+			routePattern := chi.RouteContext(r.Context()).RoutePattern()
+			if routePattern == "/health" || routePattern == "/metrics" {
+				return
+			}
+
+			status := writer.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+
+			metrics.ObserveHTTPRequest(r.Method, routePattern, status, time.Since(startedAt))
+		})
+	}
+}
+
 func accessLogMiddleware(baseLogger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

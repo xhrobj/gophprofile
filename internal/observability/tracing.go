@@ -14,7 +14,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
 )
 
-type healthCheckSampler struct {
+type telemetryNoiseSampler struct {
 	fallback sdktrace.Sampler
 }
 
@@ -90,22 +90,25 @@ func traceResource(serviceName string) (*resource.Resource, error) {
 	return res, nil
 }
 
-func (s healthCheckSampler) ShouldSample(params sdktrace.SamplingParameters) sdktrace.SamplingResult {
+func (s telemetryNoiseSampler) ShouldSample(params sdktrace.SamplingParameters) sdktrace.SamplingResult {
 	for _, attr := range params.Attributes {
-		if attr.Key == semconv.URLPathKey && attr.Value.AsString() == "/health" {
-			return sdktrace.NeverSample().ShouldSample(params)
+		if attr.Key == semconv.URLPathKey {
+			path := attr.Value.AsString()
+			if path == "/health" || path == "/metrics" {
+				return sdktrace.NeverSample().ShouldSample(params)
+			}
 		}
 	}
 
 	return s.fallback.ShouldSample(params)
 }
 
-func (s healthCheckSampler) Description() string {
-	return "HealthCheckSampler"
+func (s telemetryNoiseSampler) Description() string {
+	return "TelemetryNoiseSampler"
 }
 
 func installTracing(res *resource.Resource, exporter sdktrace.SpanExporter) *Tracing {
-	sampler := sdktrace.ParentBased(healthCheckSampler{fallback: sdktrace.AlwaysSample()})
+	sampler := sdktrace.ParentBased(telemetryNoiseSampler{fallback: sdktrace.AlwaysSample()})
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),

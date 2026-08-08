@@ -108,6 +108,8 @@ func run(ctx context.Context) error {
 		}
 	}()
 
+	metrics := observability.NewServerMetrics()
+
 	avatarRepository := postgres.NewAvatarRepository(pool)
 	avatarService := service.NewAvatarService(avatarRepository, storage, publisher, uuid.NewString, s3.OriginalKey)
 	healthChecker := health.NewChecker(pool, storage, publisher)
@@ -124,7 +126,7 @@ func run(ctx context.Context) error {
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddress,
-		Handler:           handler.NewRouter(lg, avatarService, healthChecker, cfg.MaxUploadSize),
+		Handler:           handler.NewRouter(lg, avatarService, healthChecker, cfg.MaxUploadSize, metrics),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 		ErrorLog:          errorLog,

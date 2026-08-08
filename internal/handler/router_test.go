@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -23,6 +24,32 @@ import (
 )
 
 type noopAvatarService struct{}
+
+type recordedHTTPRequest struct {
+	method   string
+	route    string
+	status   int
+	duration time.Duration
+}
+
+type recordingHTTPMetrics struct {
+	requests []recordedHTTPRequest
+}
+
+func (m *recordingHTTPMetrics) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func (m *recordingHTTPMetrics) ObserveHTTPRequest(method, route string, status int, duration time.Duration) {
+	m.requests = append(m.requests, recordedHTTPRequest{
+		method:   method,
+		route:    route,
+		status:   status,
+		duration: duration,
+	})
+}
 
 func TestRouter_RequestID(t *testing.T) {
 	tests := []struct {
@@ -36,7 +63,7 @@ func TestRouter_RequestID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var output bytes.Buffer
-			router := NewRouter(testLogger(&output), noopAvatarService{}, noopHealthChecker{}, 10<<20)
+			router := NewRouter(testLogger(&output), noopAvatarService{}, noopHealthChecker{}, 10<<20, nil)
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
 			if tt.incomingRequestID != "" {
 				request.Header.Set(requestIDHeader, tt.incomingRequestID)
@@ -91,7 +118,7 @@ func TestRouter_Tracing(t *testing.T) {
 		_ = provider.Shutdown(context.Background())
 	})
 
-	router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20)
+	router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20, nil)
 	request := httptest.NewRequest(http.MethodGet, "/web/gallery/Alice", nil)
 	request.Header.Set("traceparent", "00-c0decafebabe4bedb042feeddeadbeef-deadbeefc0decafe-01")
 	response := httptest.NewRecorder()
@@ -118,6 +145,50 @@ func TestRouter_Tracing(t *testing.T) {
 	}
 }
 
+func TestRouter_HTTPMetrics(t *testing.T) {
+	metrics := &recordingHTTPMetrics{}
+	router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20, metrics)
+
+	paths := []string{
+		"/web/gallery/Alice",
+		"/missing/c0decafe-babe-4bed-b042-feeddeadbeef",
+		"/health",
+		"/metrics",
+	}
+	for _, path := range paths {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+
+		router.ServeHTTP(response, request)
+	}
+
+	if len(metrics.requests) != 2 {
+		t.Fatalf("observed requests = %d, want 2", len(metrics.requests))
+	}
+
+	matched := metrics.requests[0]
+	if matched.method != http.MethodGet {
+		t.Errorf("matched method = %q, want %q", matched.method, http.MethodGet)
+	}
+	if matched.route != "/web/gallery/{userID}" {
+		t.Errorf("matched route = %q, want %q", matched.route, "/web/gallery/{userID}")
+	}
+	if matched.status != http.StatusOK {
+		t.Errorf("matched status = %d, want %d", matched.status, http.StatusOK)
+	}
+	if matched.duration <= 0 {
+		t.Error("matched duration is not positive")
+	}
+
+	unmatched := metrics.requests[1]
+	if unmatched.route != "" {
+		t.Errorf("unmatched route = %q, want empty route pattern", unmatched.route)
+	}
+	if unmatched.status != http.StatusNotFound {
+		t.Errorf("unmatched status = %d, want %d", unmatched.status, http.StatusNotFound)
+	}
+}
+
 func TestRouter_Web(t *testing.T) {
 	tests := []struct {
 		name string
@@ -130,7 +201,7 @@ func TestRouter_Web(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20)
+			router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20, nil)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 
@@ -152,7 +223,7 @@ func TestRouter_Web(t *testing.T) {
 
 func TestRouter_LogsNotFoundStatus(t *testing.T) {
 	var output bytes.Buffer
-	router := NewRouter(testLogger(&output), noopAvatarService{}, noopHealthChecker{}, 10<<20)
+	router := NewRouter(testLogger(&output), noopAvatarService{}, noopHealthChecker{}, 10<<20, nil)
 	request := httptest.NewRequest(http.MethodGet, "/missing", nil)
 	response := httptest.NewRecorder()
 

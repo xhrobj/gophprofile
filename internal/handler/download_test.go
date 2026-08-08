@@ -46,7 +46,7 @@ func TestDownloadHandler(t *testing.T) {
 				Content:     io.NopCloser(bytes.NewReader([]byte("image"))),
 				ContentType: "image/jpeg",
 			}}
-			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 
@@ -80,7 +80,7 @@ func TestDownloadHandler_InvalidPathParameters(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAvatarDownloader{}
-			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 
@@ -124,7 +124,7 @@ func TestDownloadHandler_Error(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAvatarDownloader{downloadErr: tt.err}
-			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/avatars/"+testAvatarID, nil)
 			response := httptest.NewRecorder()
 
