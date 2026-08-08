@@ -124,6 +124,31 @@ services:
       loki:
         condition: service_healthy
 
+  grafana:
+    image: grafana/grafana:13.1.1
+    container_name: gophprofile-grafana
+    profiles:
+      - observability
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      jaeger:
+        condition: service_started
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   postgres:
     image: postgres:17.10
     container_name: gophprofile-postgres
@@ -193,3 +218,4 @@ volumes:
   prometheus-data:
   loki-data:
   alloy-data:
+  grafana-data:
