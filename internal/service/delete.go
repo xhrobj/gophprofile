@@ -18,6 +18,9 @@ func (s *AvatarService) DeleteByID(ctx context.Context, avatarID, requesterUserI
 	ctx, span := otel.Tracer(serviceInstrumentationName).Start(ctx, "delete avatar")
 	defer func() {
 		finishSpan(span, resultErr)
+		if s.metrics != nil {
+			s.metrics.ObserveAvatarDeletion(resultErr == nil)
+		}
 	}()
 
 	avatar, err := s.repository.GetByID(ctx, avatarID)
@@ -33,6 +36,9 @@ func (s *AvatarService) DeleteCurrentByUserID(ctx context.Context, userID, reque
 	ctx, span := otel.Tracer(serviceInstrumentationName).Start(ctx, "delete avatar")
 	defer func() {
 		finishSpan(span, resultErr)
+		if s.metrics != nil {
+			s.metrics.ObserveAvatarDeletion(resultErr == nil)
+		}
 	}()
 
 	if userID != requesterUserID {

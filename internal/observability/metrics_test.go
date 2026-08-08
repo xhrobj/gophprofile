@@ -1,12 +1,18 @@
 package observability
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+type storageUsageReader struct {
+	usage int64
+	err   error
+}
 
 func TestServerMetrics_HTTP(t *testing.T) {
 	metrics := NewServerMetrics()
@@ -28,6 +34,41 @@ func TestServerMetrics_HTTP(t *testing.T) {
 	}
 }
 
+func TestServerMetrics_AvatarOperations(t *testing.T) {
+	metrics := NewServerMetrics()
+	metrics.ObserveAvatarUpload(true, 1024, 5*time.Millisecond)
+	metrics.ObserveAvatarUpload(false, 2048, 10*time.Millisecond)
+	metrics.ObserveAvatarDeletion(true)
+	metrics.ObserveAvatarDeletion(false)
+
+	body := metricsBody(t, metrics)
+
+	for _, want := range []string{
+		`gophprofile_avatar_uploads_total{result="success"} 1`,
+		`gophprofile_avatar_uploads_total{result="error"} 1`,
+		`gophprofile_avatar_upload_duration_seconds_count{result="success"} 1`,
+		`gophprofile_avatar_upload_duration_seconds_count{result="error"} 1`,
+		`gophprofile_avatar_upload_size_bytes_count 1`,
+		`gophprofile_avatar_deletions_total{result="success"} 1`,
+		`gophprofile_avatar_deletions_total{result="error"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics output does not contain %q", want)
+		}
+	}
+}
+
+func TestServerMetrics_AvatarStorageUsage(t *testing.T) {
+	metrics := NewServerMetrics()
+	metrics.RegisterAvatarStorageUsage(storageUsageReader{usage: 4096})
+
+	body := metricsBody(t, metrics)
+
+	if !strings.Contains(body, `gophprofile_avatar_storage_usage_bytes 4096`) {
+		t.Errorf("metrics output does not contain avatar storage usage")
+	}
+}
+
 func TestNewServerMetrics_UsesIndependentRegistry(t *testing.T) {
 	first := NewServerMetrics()
 	second := NewServerMetrics()
@@ -40,6 +81,10 @@ func TestNewServerMetrics_UsesIndependentRegistry(t *testing.T) {
 	if strings.Contains(metricsBody(t, second), "gophprofile_http_requests_total") {
 		t.Error("second registry contains HTTP request metric from first registry")
 	}
+}
+
+func (s storageUsageReader) StorageUsageBytes(context.Context) (int64, error) {
+	return s.usage, s.err
 }
 
 func metricsBody(t *testing.T, metrics *ServerMetrics) string {

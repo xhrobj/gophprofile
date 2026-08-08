@@ -444,6 +444,7 @@ func newTestAvatarService(
 		repository,
 		storage,
 		publisher,
+		nil,
 		func() string { return avatarID42 },
 		func(userID, avatarID, fileName string) string {
 			return "originals/" + userID + "/" + avatarID + "/" + fileName

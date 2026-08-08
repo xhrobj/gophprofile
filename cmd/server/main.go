@@ -111,7 +111,15 @@ func run(ctx context.Context) error {
 	metrics := observability.NewServerMetrics()
 
 	avatarRepository := postgres.NewAvatarRepository(pool)
-	avatarService := service.NewAvatarService(avatarRepository, storage, publisher, uuid.NewString, s3.OriginalKey)
+	metrics.RegisterAvatarStorageUsage(avatarRepository)
+	avatarService := service.NewAvatarService(
+		avatarRepository,
+		storage,
+		publisher,
+		metrics,
+		uuid.NewString,
+		s3.OriginalKey,
+	)
 	healthChecker := health.NewChecker(pool, storage, publisher)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddress)

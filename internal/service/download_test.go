@@ -74,7 +74,7 @@ func TestAvatarService_Download(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repository := &downloadRepository{avatar: avatar}
 			storage := &downloadStorage{content: []byte("image")}
-			avatarService := NewAvatarService(repository, storage, &fakeAvatarEventPublisher{}, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+			avatarService := NewAvatarService(repository, storage, &fakeAvatarEventPublisher{}, nil, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 
 			output, err := avatarService.Download(context.Background(), tt.input)
 			if err != nil {
@@ -142,7 +142,7 @@ func TestAvatarService_Download_Error(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repository := &downloadRepository{avatar: tt.avatar, err: tt.repoErr}
 			storage := &downloadStorage{err: tt.storageErr}
-			avatarService := NewAvatarService(repository, storage, &fakeAvatarEventPublisher{}, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+			avatarService := NewAvatarService(repository, storage, &fakeAvatarEventPublisher{}, nil, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 
 			_, err := avatarService.Download(context.Background(), tt.input)
 			if err == nil {

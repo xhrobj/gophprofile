@@ -234,6 +234,48 @@ func TestIntegration_PostgreSQLAvatarRepository_Processing(t *testing.T) {
 	}
 }
 
+func TestIntegration_PostgreSQLAvatarRepository_StorageUsageBytes(t *testing.T) {
+	ctx, pool := openMigratedTestDatabase(t)
+	repository := postgres.NewAvatarRepository(pool)
+
+	completed := newAvatar(avatarID42, "alice", "completed.jpg")
+	completed.SizeBytes = 1024
+	completed, err := repository.Create(ctx, completed)
+	if err != nil {
+		t.Fatalf("Create() completed avatar error = %v", err)
+	}
+	if err := repository.UpdateUploadStatus(ctx, completed.ID, model.UploadStatusCompleted); err != nil {
+		t.Fatalf("UpdateUploadStatus() completed avatar error = %v", err)
+	}
+
+	uploading := newAvatar(avatarID69, "alice", "uploading.jpg")
+	uploading.SizeBytes = 2048
+	if _, err := repository.Create(ctx, uploading); err != nil {
+		t.Fatalf("Create() uploading avatar error = %v", err)
+	}
+
+	deleted := newAvatar(avatarID99, "bob", "deleted.jpg")
+	deleted.SizeBytes = 4096
+	deleted, err = repository.Create(ctx, deleted)
+	if err != nil {
+		t.Fatalf("Create() deleted avatar error = %v", err)
+	}
+	if err := repository.UpdateUploadStatus(ctx, deleted.ID, model.UploadStatusCompleted); err != nil {
+		t.Fatalf("UpdateUploadStatus() deleted avatar error = %v", err)
+	}
+	if err := repository.SoftDelete(ctx, deleted.ID); err != nil {
+		t.Fatalf("SoftDelete() error = %v", err)
+	}
+
+	usage, err := repository.StorageUsageBytes(ctx)
+	if err != nil {
+		t.Fatalf("StorageUsageBytes() error = %v", err)
+	}
+	if usage != completed.SizeBytes {
+		t.Errorf("StorageUsageBytes() = %d, want %d", usage, completed.SizeBytes)
+	}
+}
+
 func TestIntegration_PostgreSQLAvatarRepository_DeletePermanent(t *testing.T) {
 	ctx, pool := openMigratedTestDatabase(t)
 	repository := postgres.NewAvatarRepository(pool)

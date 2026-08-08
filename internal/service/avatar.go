@@ -66,6 +66,15 @@ type AvatarEventPublisher interface {
 	PublishAvatarDeleted(ctx context.Context, avatar model.Avatar) error
 }
 
+// AvatarMetrics описывает бизнес-метрики операций с аватарами.
+type AvatarMetrics interface {
+	// ObserveAvatarUpload учитывает результат и параметры завершенной загрузки.
+	ObserveAvatarUpload(success bool, sizeBytes int64, duration time.Duration)
+
+	// ObserveAvatarDeletion учитывает результат завершенного удаления.
+	ObserveAvatarDeletion(success bool)
+}
+
 // IDGenerator создаёт идентификатор новой аватарки.
 type IDGenerator func() string
 
@@ -84,6 +93,7 @@ type AvatarService struct {
 	repository       AvatarRepository
 	storage          AvatarStorage
 	publisher        AvatarEventPublisher
+	metrics          AvatarMetrics
 	generateID       IDGenerator
 	buildOriginalKey OriginalKeyBuilder
 }
@@ -93,6 +103,7 @@ func NewAvatarService(
 	repository AvatarRepository,
 	storage AvatarStorage,
 	publisher AvatarEventPublisher,
+	metrics AvatarMetrics,
 	generateID IDGenerator,
 	buildOriginalKey OriginalKeyBuilder,
 ) *AvatarService {
@@ -100,6 +111,7 @@ func NewAvatarService(
 		repository:       repository,
 		storage:          storage,
 		publisher:        publisher,
+		metrics:          metrics,
 		generateID:       generateID,
 		buildOriginalKey: buildOriginalKey,
 	}
@@ -107,9 +119,13 @@ func NewAvatarService(
 
 // Upload создаёт метаданные аватарки, сохраняет оригинал и публикует событие для фоновой обработки.
 func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (result model.Avatar, resultErr error) {
+	startedAt := time.Now()
 	ctx, span := otel.Tracer(serviceInstrumentationName).Start(ctx, "upload avatar")
 	defer func() {
 		finishSpan(span, resultErr)
+		if s.metrics != nil {
+			s.metrics.ObserveAvatarUpload(resultErr == nil, int64(len(input.Content)), time.Since(startedAt))
+		}
 	}()
 
 	metadata, err := inspectImage(input.Content)
