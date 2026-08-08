@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type storageUsageReader struct {
@@ -66,6 +68,33 @@ func TestServerMetrics_AvatarStorageUsage(t *testing.T) {
 
 	if !strings.Contains(body, `gophprofile_avatar_storage_usage_bytes 4096`) {
 		t.Errorf("metrics output does not contain avatar storage usage")
+	}
+}
+
+func TestServerMetrics_PostgreSQLPool(t *testing.T) {
+	pool, err := pgxpool.New(
+		context.Background(),
+		"postgres://gophprofile:gophprofile@127.0.0.1:1/gophprofile?sslmode=disable",
+	)
+	if err != nil {
+		t.Fatalf("create PostgreSQL pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	metrics := NewServerMetrics()
+	metrics.RegisterPostgreSQLPool(pool)
+	body := metricsBody(t, metrics.Handler())
+
+	for _, want := range []string{
+		`gophprofile_postgres_pool_acquired_connections 0`,
+		`gophprofile_postgres_pool_idle_connections 0`,
+		`gophprofile_postgres_pool_total_connections 0`,
+		`gophprofile_postgres_pool_acquires_total 0`,
+		`gophprofile_postgres_pool_acquire_duration_seconds_total 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics output does not contain %q", want)
+		}
 	}
 }
 

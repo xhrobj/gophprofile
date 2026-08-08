@@ -95,6 +95,7 @@ func run(ctx context.Context) error {
 	}()
 
 	metrics := observability.NewWorkerMetrics()
+	metrics.RegisterPostgreSQLPool(pool)
 	metricsListener, err := net.Listen("tcp", cfg.MetricsAddress)
 	if err != nil {
 		return fmt.Errorf("listen for Worker metrics on %s: %w", cfg.MetricsAddress, err)

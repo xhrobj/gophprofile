@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -195,6 +196,11 @@ func (m *ServerMetrics) RegisterAvatarStorageUsage(reader AvatarStorageUsageRead
 	))
 }
 
+// RegisterPostgreSQLPool добавляет метрики пула подключений PostgreSQL.
+func (m *ServerMetrics) RegisterPostgreSQLPool(pool *pgxpool.Pool) {
+	registerPostgreSQLPoolMetrics(m.registry, pool)
+}
+
 // Handler возвращает HTTP-handler для выдачи метрик в формате Prometheus.
 func (m *ServerMetrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
@@ -227,6 +233,11 @@ func (m *ServerMetrics) ObserveAvatarDeletion(success bool) {
 	m.avatarDeletions.WithLabelValues(metricResult(success)).Inc()
 }
 
+// RegisterPostgreSQLPool добавляет метрики пула подключений PostgreSQL.
+func (m *WorkerMetrics) RegisterPostgreSQLPool(pool *pgxpool.Pool) {
+	registerPostgreSQLPoolMetrics(m.registry, pool)
+}
+
 // Handler возвращает HTTP-handler для выдачи метрик Воркера в формате Prometheus.
 func (m *WorkerMetrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
@@ -239,6 +250,56 @@ func (m *WorkerMetrics) ObserveProcessedEvent(eventName string, success bool, du
 
 	m.processedEvents.WithLabelValues(eventName, result).Inc()
 	m.processingDuration.WithLabelValues(eventName, result).Observe(duration.Seconds())
+}
+
+func registerPostgreSQLPoolMetrics(registry *prometheus.Registry, pool *pgxpool.Pool) {
+	registry.MustRegister(
+		prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: metricsNamespace,
+				Subsystem: "postgres_pool",
+				Name:      "acquired_connections",
+				Help:      "Current number of acquired PostgreSQL pool connections.",
+			},
+			func() float64 { return float64(pool.Stat().AcquiredConns()) },
+		),
+		prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: metricsNamespace,
+				Subsystem: "postgres_pool",
+				Name:      "idle_connections",
+				Help:      "Current number of idle PostgreSQL pool connections.",
+			},
+			func() float64 { return float64(pool.Stat().IdleConns()) },
+		),
+		prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: metricsNamespace,
+				Subsystem: "postgres_pool",
+				Name:      "total_connections",
+				Help:      "Current total number of PostgreSQL pool connections.",
+			},
+			func() float64 { return float64(pool.Stat().TotalConns()) },
+		),
+		prometheus.NewCounterFunc(
+			prometheus.CounterOpts{
+				Namespace: metricsNamespace,
+				Subsystem: "postgres_pool",
+				Name:      "acquires_total",
+				Help:      "Total number of successful PostgreSQL pool acquires.",
+			},
+			func() float64 { return float64(pool.Stat().AcquireCount()) },
+		),
+		prometheus.NewCounterFunc(
+			prometheus.CounterOpts{
+				Namespace: metricsNamespace,
+				Subsystem: "postgres_pool",
+				Name:      "acquire_duration_seconds_total",
+				Help:      "Total time spent acquiring PostgreSQL pool connections in seconds.",
+			},
+			func() float64 { return pool.Stat().AcquireDuration().Seconds() },
+		),
+	)
 }
 
 func metricWorkerEvent(eventName string) string {

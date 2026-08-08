@@ -109,6 +109,7 @@ func run(ctx context.Context) error {
 	}()
 
 	metrics := observability.NewServerMetrics()
+	metrics.RegisterPostgreSQLPool(pool)
 
 	avatarRepository := postgres.NewAvatarRepository(pool)
 	metrics.RegisterAvatarStorageUsage(avatarRepository)
