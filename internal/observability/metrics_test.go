@@ -71,6 +71,17 @@ func TestServerMetrics_AvatarStorageUsage(t *testing.T) {
 	}
 }
 
+func TestServerMetrics_AvatarStorageUsage_Error(t *testing.T) {
+	metrics := NewServerMetrics()
+	metrics.RegisterAvatarStorageUsage(storageUsageReader{err: context.DeadlineExceeded})
+
+	body := metricsBody(t, metrics.Handler())
+
+	if !strings.Contains(body, `gophprofile_avatar_storage_usage_bytes NaN`) {
+		t.Errorf("metrics output does not contain NaN avatar storage usage")
+	}
+}
+
 func TestServerMetrics_PostgreSQLPool(t *testing.T) {
 	pool, err := pgxpool.New(
 		context.Background(),

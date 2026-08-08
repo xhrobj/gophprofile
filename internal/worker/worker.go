@@ -157,7 +157,7 @@ func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error
 		err = w.rejectInvalidMessage(ctx, item, fmt.Errorf("unsupported routing key %q", item.RoutingKey()))
 	}
 
-	if w.metrics != nil {
+	if w.metrics != nil && (ctx.Err() == nil || err != nil) {
 		w.metrics.ObserveProcessedEvent(item.RoutingKey(), err == nil, time.Since(startedAt))
 	}
 

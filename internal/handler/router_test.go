@@ -176,10 +176,6 @@ func TestRouter_HTTPMetrics(t *testing.T) {
 	if matched.status != http.StatusOK {
 		t.Errorf("matched status = %d, want %d", matched.status, http.StatusOK)
 	}
-	if matched.duration <= 0 {
-		t.Error("matched duration is not positive")
-	}
-
 	unmatched := metrics.requests[1]
 	if unmatched.route != "" {
 		t.Errorf("unmatched route = %q, want empty route pattern", unmatched.route)

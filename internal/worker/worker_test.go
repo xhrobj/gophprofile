@@ -619,8 +619,10 @@ func TestWorker_HandleDelivery_RequeuesClaimOnShutdown(t *testing.T) {
 		},
 	}
 	processor := &fakeImageProcessor{}
+	metrics := &fakeMetrics{}
 	item := newFakeUploadedDelivery(t, testEvent())
-	avatarWorker := newTestWorker(repository, storage, processor)
+	avatarWorker := New(&fakeConsumer{}, repository, storage, processor, metrics, discardLogger())
+	avatarWorker.retry = retryPolicy{maxAttempts: maxRetryAttempts, initialBackoff: 0}
 
 	if err := avatarWorker.handleDelivery(ctx, item); err != nil {
 		t.Fatalf("handleDelivery() error = %v", err)
@@ -631,6 +633,9 @@ func TestWorker_HandleDelivery_RequeuesClaimOnShutdown(t *testing.T) {
 	}
 	if !reflect.DeepEqual(repository.statusUpdates, []model.ProcessingStatus{model.ProcessingStatusPending}) {
 		t.Errorf("processing status updates = %v, want [pending]", repository.statusUpdates)
+	}
+	if len(metrics.events) != 0 {
+		t.Errorf("metric events = %v, want none for requeued delivery", metrics.events)
 	}
 }
 
