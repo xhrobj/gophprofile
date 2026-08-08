@@ -14,6 +14,10 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
 )
 
+type healthCheckSampler struct {
+	fallback sdktrace.Sampler
+}
+
 // Tracing управляет жизненным циклом трассировки приложения.
 type Tracing struct {
 	provider *sdktrace.TracerProvider
@@ -86,10 +90,26 @@ func traceResource(serviceName string) (*resource.Resource, error) {
 	return res, nil
 }
 
+func (s healthCheckSampler) ShouldSample(params sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	for _, attr := range params.Attributes {
+		if attr.Key == semconv.URLPathKey && attr.Value.AsString() == "/health" {
+			return sdktrace.NeverSample().ShouldSample(params)
+		}
+	}
+
+	return s.fallback.ShouldSample(params)
+}
+
+func (s healthCheckSampler) Description() string {
+	return "HealthCheckSampler"
+}
+
 func installTracing(res *resource.Resource, exporter sdktrace.SpanExporter) *Tracing {
+	sampler := sdktrace.ParentBased(healthCheckSampler{fallback: sdktrace.AlwaysSample()})
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sampler),
 	)
 
 	otel.SetTracerProvider(provider)

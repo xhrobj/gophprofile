@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 type recordingExporter struct {
@@ -105,6 +106,51 @@ func TestTraceEndpoint(t *testing.T) {
 				t.Errorf("traceEndpoint() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTracing_DropsHealthCheckTrace(t *testing.T) {
+	preserveGlobals(t)
+
+	res, err := traceResource("server")
+	if err != nil {
+		t.Fatalf("traceResource() error = %v", err)
+	}
+
+	exporter := &recordingExporter{}
+	tracing := installTracing(res, exporter)
+	tracer := otel.Tracer("test")
+
+	healthCtx, healthSpan := tracer.Start(
+		context.Background(),
+		"GET",
+		oteltrace.WithAttributes(semconv.URLPath("/health")),
+	)
+	_, healthChild := tracer.Start(healthCtx, "HTTP HEAD")
+	healthChild.End()
+	healthSpan.End()
+
+	requestCtx, requestSpan := tracer.Start(
+		context.Background(),
+		"POST",
+		oteltrace.WithAttributes(semconv.URLPath("/api/v1/avatars")),
+	)
+	_, requestChild := tracer.Start(requestCtx, "INSERT")
+	requestChild.End()
+	requestSpan.End()
+
+	if err := tracing.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+
+	if len(exporter.spans) != 2 {
+		t.Fatalf("exported spans = %d, want 2", len(exporter.spans))
+	}
+
+	for _, span := range exporter.spans {
+		if span.Name() == "GET" || span.Name() == "HTTP HEAD" {
+			t.Errorf("health-check span %q was exported", span.Name())
+		}
 	}
 }
 
