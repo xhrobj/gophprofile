@@ -6,9 +6,12 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 	"github.com/xhrobj/gophprofile/internal/config"
@@ -17,10 +20,14 @@ import (
 	"github.com/xhrobj/gophprofile/internal/observability"
 	"github.com/xhrobj/gophprofile/internal/postgres"
 	"github.com/xhrobj/gophprofile/internal/s3"
+	httpserver "github.com/xhrobj/gophprofile/internal/server"
 	"github.com/xhrobj/gophprofile/internal/worker"
 )
 
-const serviceName = "worker"
+const (
+	serviceName              = "worker"
+	metricsReadHeaderTimeout = 5 * time.Second
+)
 
 func main() {
 	if err := printBanner(os.Stdout); err != nil {
@@ -87,15 +94,60 @@ func run(ctx context.Context) error {
 		}
 	}()
 
+	metrics := observability.NewWorkerMetrics()
+	metricsListener, err := net.Listen("tcp", cfg.MetricsAddress)
+	if err != nil {
+		return fmt.Errorf("listen for Worker metrics on %s: %w", cfg.MetricsAddress, err)
+	}
+
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", metrics.Handler())
+	metricsServer := &http.Server{
+		Addr:              cfg.MetricsAddress,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: metricsReadHeaderTimeout,
+		ErrorLog: slog.NewLogLogger(
+			lg.With(slog.String("logger", "metrics/net/http")).Handler(),
+			slog.LevelError,
+		),
+	}
+
 	avatarWorker := worker.New(
 		consumer,
 		postgres.NewAvatarRepository(pool),
 		storage,
 		imageprocessor.New(),
+		metrics,
 		lg,
 	)
 
-	return avatarWorker.Run(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	metricsErrors := make(chan error, 1)
+	go func() {
+		metricsErrors <- httpserver.Run(
+			runCtx,
+			metricsListener,
+			metricsServer,
+			cfg.ShutdownTimeout,
+			lg.With(slog.String("component", "metrics")),
+		)
+		cancel()
+	}()
+
+	workerErr := avatarWorker.Run(runCtx)
+	cancel()
+	metricsErr := <-metricsErrors
+
+	if workerErr != nil {
+		return workerErr
+	}
+	if metricsErr != nil {
+		return fmt.Errorf("run Worker metrics server: %w", metricsErr)
+	}
+
+	return nil
 }
 
 func printBanner(output io.Writer) error {

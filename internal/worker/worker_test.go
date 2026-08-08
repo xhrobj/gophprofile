@@ -25,6 +25,15 @@ const (
 
 type fakeConsumer struct{}
 
+type processedEventMetric struct {
+	event   string
+	success bool
+}
+
+type fakeMetrics struct {
+	events []processedEventMetric
+}
+
 type fakeDelivery struct {
 	body        []byte
 	headers     map[string]string
@@ -80,7 +89,7 @@ type fakeImageProcessor struct {
 func TestWorker_Run_StopsOnContextCancellation(t *testing.T) {
 	lg := discardLogger()
 	consumer := &fakeConsumer{}
-	avatarWorker := New(consumer, nil, nil, nil, lg)
+	avatarWorker := New(consumer, nil, nil, nil, nil, lg)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 
@@ -170,6 +179,39 @@ func TestWorker_HandleDelivery_AcknowledgesDuplicate(t *testing.T) {
 			processor.calls,
 			repository.completeCalls,
 		)
+	}
+}
+
+func TestWorker_HandleDelivery_RecordsMetrics(t *testing.T) {
+	metrics := &fakeMetrics{}
+	avatarWorker := New(
+		&fakeConsumer{},
+		&fakeRepository{claimResults: []claimResult{{claimed: true}}},
+		&fakeStorage{content: []byte("original")},
+		&fakeImageProcessor{thumbnails: testThumbnails()},
+		metrics,
+		discardLogger(),
+	)
+	avatarWorker.retry = retryPolicy{maxAttempts: maxRetryAttempts, initialBackoff: 0}
+
+	if err := avatarWorker.handleDelivery(context.Background(), newFakeUploadedDelivery(t, testEvent())); err != nil {
+		t.Fatalf("handleDelivery() success error = %v", err)
+	}
+
+	failed := newFakeUploadedDelivery(t, testEvent())
+	failed.body = []byte("not json")
+	if err := avatarWorker.handleDelivery(context.Background(), failed); err != nil {
+		t.Fatalf("handleDelivery() handled error = %v", err)
+	}
+
+	if len(metrics.events) != 2 {
+		t.Fatalf("metric events = %d, want 2", len(metrics.events))
+	}
+	if metrics.events[0].event != event.AvatarUploadedRoutingKey || !metrics.events[0].success {
+		t.Errorf("success metric = %#v, want uploaded/success", metrics.events[0])
+	}
+	if metrics.events[1].event != event.AvatarUploadedRoutingKey || metrics.events[1].success {
+		t.Errorf("error metric = %#v, want uploaded/error", metrics.events[1])
 	}
 }
 
@@ -758,12 +800,16 @@ func (f *fakeImageProcessor) Process(io.Reader) ([]imageprocessor.Thumbnail, err
 	return f.thumbnails, f.err
 }
 
+func (f *fakeMetrics) ObserveProcessedEvent(eventName string, success bool, _ time.Duration) {
+	f.events = append(f.events, processedEventMetric{event: eventName, success: success})
+}
+
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func newTestWorker(repository Repository, storage Storage, processor ImageProcessor) *Worker {
-	avatarWorker := New(&fakeConsumer{}, repository, storage, processor, discardLogger())
+	avatarWorker := New(&fakeConsumer{}, repository, storage, processor, nil, discardLogger())
 	avatarWorker.retry = retryPolicy{
 		maxAttempts:    maxRetryAttempts,
 		initialBackoff: 0,

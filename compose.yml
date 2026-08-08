@@ -43,6 +43,9 @@ services:
     container_name: gophprofile-worker
     environment:
       <<: *app-environment
+      WORKER_METRICS_ADDRESS: :9092
+    ports:
+      - "127.0.0.1:9092:9092"
     depends_on:
       postgres:
         condition: service_healthy

@@ -98,6 +98,7 @@ func TestComponent_WorkerAvatarProcessing(t *testing.T) {
 		repository,
 		storage,
 		imageprocessor.New(),
+		nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	workerCtx, stopWorker := context.WithCancel(ctx)

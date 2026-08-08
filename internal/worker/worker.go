@@ -53,6 +53,12 @@ type ImageProcessor interface {
 	Process(reader io.Reader) ([]imageprocessor.Thumbnail, error)
 }
 
+// Metrics описывает метрики обработки событий Воркером.
+type Metrics interface {
+	// ObserveProcessedEvent учитывает результат и длительность обработки broker event.
+	ObserveProcessedEvent(event string, success bool, duration time.Duration)
+}
+
 type retryPolicy struct {
 	maxAttempts    int
 	initialBackoff time.Duration
@@ -68,6 +74,7 @@ type Worker struct {
 	repository     Repository
 	storage        Storage
 	imageProcessor ImageProcessor
+	metrics        Metrics
 	logger         *slog.Logger
 	retry          retryPolicy
 }
@@ -78,6 +85,7 @@ func New(
 	repository Repository,
 	storage Storage,
 	imageProcessor ImageProcessor,
+	metrics Metrics,
 	lg *slog.Logger,
 ) *Worker {
 	return &Worker{
@@ -85,6 +93,7 @@ func New(
 		repository:     repository,
 		storage:        storage,
 		imageProcessor: imageProcessor,
+		metrics:        metrics,
 		logger:         lg,
 		retry: retryPolicy{
 			maxAttempts:    maxRetryAttempts,
@@ -121,6 +130,7 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error {
+	startedAt := time.Now()
 	ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier(item.Headers()))
 	ctx, span := otel.Tracer(workerInstrumentationName).Start(
 		ctx,
@@ -145,6 +155,10 @@ func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error
 		err = w.handleAvatarDeletedDelivery(ctx, item)
 	default:
 		err = w.rejectInvalidMessage(ctx, item, fmt.Errorf("unsupported routing key %q", item.RoutingKey()))
+	}
+
+	if w.metrics != nil {
+		w.metrics.ObserveProcessedEvent(item.RoutingKey(), err == nil, time.Since(startedAt))
 	}
 
 	if err == nil {

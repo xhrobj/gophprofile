@@ -74,6 +74,7 @@ func TestLoadWorker(t *testing.T) {
 
 			LogLevel: "info",
 		},
+		MetricsAddress: ":9092",
 	}
 
 	if got != want {
@@ -129,6 +130,7 @@ func TestLoadWorker_Validation(t *testing.T) {
 		{name: "missing RabbitMQ exchange", envName: envRabbitMQExchange, value: ""},
 		{name: "missing RabbitMQ queue", envName: envRabbitMQQueue, value: ""},
 		{name: "invalid tracing flag", envName: envTracingEnabled, value: "sometimes"},
+		{name: "missing Worker metrics address", envName: envWorkerMetricsAddress, value: ""},
 		{name: "missing shutdown timeout", envName: envShutdownTimeout, value: ""},
 		{name: "invalid shutdown timeout", envName: envShutdownTimeout, value: "soon"},
 		{name: "zero shutdown timeout", envName: envShutdownTimeout, value: "0s"},
@@ -214,6 +216,7 @@ func setValidEnvironment(t *testing.T) {
 
 	t.Setenv(envHTTPAddress, ":8080")
 	t.Setenv(envMaxUploadSize, "10485760")
+	t.Setenv(envWorkerMetricsAddress, ":9092")
 	t.Setenv(envShutdownTimeout, "10s")
 
 	t.Setenv(envLogLevel, "info")

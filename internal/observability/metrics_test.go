@@ -19,7 +19,7 @@ func TestServerMetrics_HTTP(t *testing.T) {
 	metrics.ObserveHTTPRequest(http.MethodGet, "/api/v1/avatars/{avatarID}", http.StatusOK, 5*time.Millisecond)
 	metrics.ObserveHTTPRequest("CUSTOM", "", http.StatusInternalServerError, 42*time.Millisecond)
 
-	body := metricsBody(t, metrics)
+	body := metricsBody(t, metrics.Handler())
 
 	for _, want := range []string{
 		`gophprofile_http_requests_total{method="GET",route="/api/v1/avatars/{avatarID}",status_class="2xx"} 1`,
@@ -41,7 +41,7 @@ func TestServerMetrics_AvatarOperations(t *testing.T) {
 	metrics.ObserveAvatarDeletion(true)
 	metrics.ObserveAvatarDeletion(false)
 
-	body := metricsBody(t, metrics)
+	body := metricsBody(t, metrics.Handler())
 
 	for _, want := range []string{
 		`gophprofile_avatar_uploads_total{result="success"} 1`,
@@ -62,7 +62,7 @@ func TestServerMetrics_AvatarStorageUsage(t *testing.T) {
 	metrics := NewServerMetrics()
 	metrics.RegisterAvatarStorageUsage(storageUsageReader{usage: 4096})
 
-	body := metricsBody(t, metrics)
+	body := metricsBody(t, metrics.Handler())
 
 	if !strings.Contains(body, `gophprofile_avatar_storage_usage_bytes 4096`) {
 		t.Errorf("metrics output does not contain avatar storage usage")
@@ -75,11 +75,47 @@ func TestNewServerMetrics_UsesIndependentRegistry(t *testing.T) {
 
 	first.ObserveHTTPRequest(http.MethodGet, "/api/v1/avatars", http.StatusOK, time.Millisecond)
 
-	if !strings.Contains(metricsBody(t, first), "gophprofile_http_requests_total") {
+	if !strings.Contains(metricsBody(t, first.Handler()), "gophprofile_http_requests_total") {
 		t.Error("first registry has no HTTP request metric")
 	}
-	if strings.Contains(metricsBody(t, second), "gophprofile_http_requests_total") {
+	if strings.Contains(metricsBody(t, second.Handler()), "gophprofile_http_requests_total") {
 		t.Error("second registry contains HTTP request metric from first registry")
+	}
+}
+
+func TestWorkerMetrics_ProcessedEvents(t *testing.T) {
+	metrics := NewWorkerMetrics()
+	metrics.ObserveProcessedEvent("avatar.uploaded", true, 5*time.Millisecond)
+	metrics.ObserveProcessedEvent("avatar.deleted", false, 10*time.Millisecond)
+	metrics.ObserveProcessedEvent("custom.event", false, 15*time.Millisecond)
+
+	body := metricsBody(t, metrics.Handler())
+
+	for _, want := range []string{
+		`gophprofile_worker_processed_events_total{event="avatar.uploaded",result="success"} 1`,
+		`gophprofile_worker_processed_events_total{event="avatar.deleted",result="error"} 1`,
+		`gophprofile_worker_processed_events_total{event="unknown",result="error"} 1`,
+		`gophprofile_worker_processing_duration_seconds_count{event="avatar.uploaded",result="success"} 1`,
+		`go_goroutines`,
+		`process_start_time_seconds`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics output does not contain %q", want)
+		}
+	}
+}
+
+func TestNewWorkerMetrics_UsesIndependentRegistry(t *testing.T) {
+	first := NewWorkerMetrics()
+	second := NewWorkerMetrics()
+
+	first.ObserveProcessedEvent("avatar.uploaded", true, time.Millisecond)
+
+	if !strings.Contains(metricsBody(t, first.Handler()), "gophprofile_worker_processed_events_total") {
+		t.Error("first registry has no Worker event metric")
+	}
+	if strings.Contains(metricsBody(t, second.Handler()), "gophprofile_worker_processed_events_total") {
+		t.Error("second registry contains Worker event metric from first registry")
 	}
 }
 
@@ -87,12 +123,12 @@ func (s storageUsageReader) StorageUsageBytes(context.Context) (int64, error) {
 	return s.usage, s.err
 }
 
-func metricsBody(t *testing.T, metrics *ServerMetrics) string {
+func metricsBody(t *testing.T, handler http.Handler) string {
 	t.Helper()
 
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	response := httptest.NewRecorder()
-	metrics.Handler().ServeHTTP(response, request)
+	handler.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("metrics status = %d, want %d", response.Code, http.StatusOK)

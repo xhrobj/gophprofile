@@ -27,9 +27,10 @@ const (
 
 	envLogLevel = "LOG_LEVEL"
 
-	envHTTPAddress     = "HTTP_ADDRESS"
-	envMaxUploadSize   = "MAX_UPLOAD_SIZE"
-	envShutdownTimeout = "SHUTDOWN_TIMEOUT"
+	envHTTPAddress          = "HTTP_ADDRESS"
+	envMaxUploadSize        = "MAX_UPLOAD_SIZE"
+	envWorkerMetricsAddress = "WORKER_METRICS_ADDRESS"
+	envShutdownTimeout      = "SHUTDOWN_TIMEOUT"
 )
 
 // Common содержит параметры конфигурации, общие для Сервера и Воркера.
@@ -63,6 +64,7 @@ type Server struct {
 // Worker содержит конфигурацию фонового воркера.
 type Worker struct {
 	Common
+	MetricsAddress string
 }
 
 // LoadServer загружает и проверяет конфигурацию HTTP-сервера.
@@ -96,7 +98,15 @@ func LoadWorker() (Worker, error) {
 		return Worker{}, err
 	}
 
-	return Worker{Common: common}, nil
+	metricsAddress, err := required(envWorkerMetricsAddress)
+	if err != nil {
+		return Worker{}, err
+	}
+
+	return Worker{
+		Common:         common,
+		MetricsAddress: metricsAddress,
+	}, nil
 }
 
 func loadCommon() (Common, error) {

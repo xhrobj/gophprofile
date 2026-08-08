@@ -10,6 +10,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/xhrobj/gophprofile/internal/event"
 )
 
 const (
@@ -17,6 +19,7 @@ const (
 	unknownRoute             = "unmatched"
 	unknownMethod            = "OTHER"
 	unknownStatusClass       = "other"
+	unknownEvent             = "unknown"
 	metricResultSuccess      = "success"
 	metricResultError        = "error"
 	storageUsageQueryTimeout = time.Second
@@ -37,6 +40,13 @@ type ServerMetrics struct {
 	avatarUploadDuration *prometheus.HistogramVec
 	avatarUploadSize     prometheus.Histogram
 	avatarDeletions      *prometheus.CounterVec
+}
+
+// WorkerMetrics содержит Prometheus-метрики Воркера.
+type WorkerMetrics struct {
+	registry           *prometheus.Registry
+	processedEvents    *prometheus.CounterVec
+	processingDuration *prometheus.HistogramVec
 }
 
 var uploadSizeBuckets = []float64{
@@ -126,6 +136,42 @@ func NewServerMetrics() *ServerMetrics {
 	return metrics
 }
 
+// NewWorkerMetrics создаёт изолированный registry с метриками Воркера и стандартными метриками процесса.
+func NewWorkerMetrics() *WorkerMetrics {
+	registry := prometheus.NewRegistry()
+	metrics := &WorkerMetrics{
+		registry: registry,
+		processedEvents: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: metricsNamespace,
+				Subsystem: "worker",
+				Name:      "processed_events_total",
+				Help:      "Total number of broker events handled by the worker by event and result.",
+			},
+			[]string{"event", "result"},
+		),
+		processingDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: metricsNamespace,
+				Subsystem: "worker",
+				Name:      "processing_duration_seconds",
+				Help:      "Broker event handling duration in seconds by event and result.",
+				Buckets:   prometheus.DefBuckets,
+			},
+			[]string{"event", "result"},
+		),
+	}
+
+	registry.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		metrics.processedEvents,
+		metrics.processingDuration,
+	)
+
+	return metrics
+}
+
 // RegisterAvatarStorageUsage добавляет метрику логического объёма оригиналов из PostgreSQL.
 func (m *ServerMetrics) RegisterAvatarStorageUsage(reader AvatarStorageUsageReader) {
 	m.registry.MustRegister(prometheus.NewGaugeFunc(
@@ -179,6 +225,29 @@ func (m *ServerMetrics) ObserveAvatarUpload(success bool, sizeBytes int64, durat
 // ObserveAvatarDeletion учитывает завершившуюся операцию удаления аватара.
 func (m *ServerMetrics) ObserveAvatarDeletion(success bool) {
 	m.avatarDeletions.WithLabelValues(metricResult(success)).Inc()
+}
+
+// Handler возвращает HTTP-handler для выдачи метрик Воркера в формате Prometheus.
+func (m *WorkerMetrics) Handler() http.Handler {
+	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+}
+
+// ObserveProcessedEvent учитывает завершенную обработку broker event.
+func (m *WorkerMetrics) ObserveProcessedEvent(eventName string, success bool, duration time.Duration) {
+	eventName = metricWorkerEvent(eventName)
+	result := metricResult(success)
+
+	m.processedEvents.WithLabelValues(eventName, result).Inc()
+	m.processingDuration.WithLabelValues(eventName, result).Observe(duration.Seconds())
+}
+
+func metricWorkerEvent(eventName string) string {
+	switch eventName {
+	case event.AvatarUploadedRoutingKey, event.AvatarDeletedRoutingKey:
+		return eventName
+	default:
+		return unknownEvent
+	}
 }
 
 func metricMethod(method string) string {

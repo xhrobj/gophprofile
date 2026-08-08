@@ -38,4 +38,6 @@ FROM runtime AS worker
 
 COPY --from=builder /out/worker /app/worker
 
+EXPOSE 9092
+
 ENTRYPOINT ["/app/worker"]
