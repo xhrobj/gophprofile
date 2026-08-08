@@ -112,7 +112,9 @@ services:
     ports:
       - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"
+      - "127.0.0.1:15692:15692"
     volumes:
+      - ./docker/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
       test:
