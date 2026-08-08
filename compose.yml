@@ -82,6 +82,48 @@ services:
       timeout: 5s
       retries: 5
 
+  loki:
+    image: grafana/loki:3.7.3
+    container_name: gophprofile-loki
+    profiles:
+      - observability
+    command:
+      - -config.file=/etc/loki/config.yml
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./observability/loki/config.yml:/etc/loki/config.yml:ro
+      - loki-data:/loki
+    healthcheck:
+      test:
+        - CMD
+        - /usr/bin/loki
+        - -health
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  alloy:
+    image: grafana/alloy:v1.18.0
+    container_name: gophprofile-alloy
+    profiles:
+      - observability
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - --disable-reporting
+      - /etc/alloy/config.alloy
+    ports:
+      - "127.0.0.1:12345:12345"
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+
   postgres:
     image: postgres:17.10
     container_name: gophprofile-postgres
@@ -149,3 +191,5 @@ volumes:
   minio-data:
   rabbitmq-data:
   prometheus-data:
+  loki-data:
+  alloy-data:

@@ -1,0 +1,34 @@
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "application_logs" {
+  targets = discovery.docker.containers.targets
+
+  // Оставляем только логи Server и Worker.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "server|worker"
+    action        = "keep"
+  }
+
+  // Используем имя Compose-сервиса как стабильный low-cardinality label.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "application" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.application_logs.output
+  labels     = {}
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
