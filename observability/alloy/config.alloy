@@ -1,17 +1,16 @@
 discovery.docker "containers" {
   host             = "unix:///var/run/docker.sock"
   refresh_interval = "5s"
+
+  // Ограничиваем discovery контейнерами приложения GophProfile.
+  filter {
+    name   = "label"
+    values = ["gophprofile.logs=true"]
+  }
 }
 
 discovery.relabel "application_logs" {
   targets = discovery.docker.containers.targets
-
-  // Оставляем только логи Server и Worker.
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "server|worker"
-    action        = "keep"
-  }
 
   // Используем имя Compose-сервиса как стабильный low-cardinality label.
   rule {

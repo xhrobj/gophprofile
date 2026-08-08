@@ -68,12 +68,12 @@ s3-up:
 rabbitmq-up:
 	docker compose up -d --wait rabbitmq
 
-# запустить локальную инфраструктуру и дождаться ее готовности
+# поднять внешние зависимости приложения
 infra-up: db-up s3-up rabbitmq-up
 
-# остановить контейнеры локальной инфраструктуры
+# остановить внешние зависимости приложения
 infra-down:
-	docker compose --profile observability stop postgres minio rabbitmq jaeger prometheus loki alloy grafana
+	docker compose stop postgres minio rabbitmq
 
 # удалить контейнеры, сети и локальные данные Docker Compose
 infra-erase:

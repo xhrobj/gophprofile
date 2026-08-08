@@ -24,6 +24,8 @@ services:
       <<: *app-environment
       HTTP_ADDRESS: :8080
       MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE}
+    labels:
+      gophprofile.logs: "true"
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -44,6 +46,8 @@ services:
     environment:
       <<: *app-environment
       WORKER_METRICS_ADDRESS: :9092
+    labels:
+      gophprofile.logs: "true"
     ports:
       - "127.0.0.1:9092:9092"
     depends_on:
