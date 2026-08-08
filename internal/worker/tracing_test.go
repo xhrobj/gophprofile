@@ -2,9 +2,11 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -50,6 +52,18 @@ func TestWorker_Tracing(t *testing.T) {
 		t.Fatalf("handle deleted delivery error = %v", err)
 	}
 
+	failedWorker := newTestWorker(
+		&fakeRepository{claimResults: []claimResult{{err: errors.New("PostgreSQL unavailable")}}},
+		&fakeStorage{},
+		&fakeImageProcessor{},
+	)
+	failedWorker.retry = retryPolicy{maxAttempts: 1}
+	failedDelivery := newFakeUploadedDelivery(t, testEvent())
+	failedDelivery.headers = headers
+	if err := failedWorker.handleDelivery(context.Background(), failedDelivery); err != nil {
+		t.Fatalf("handle failed delivery error = %v", err)
+	}
+
 	parentSpan.End()
 	spans := spanRecorder.Ended()
 
@@ -74,6 +88,8 @@ func TestWorker_Tracing(t *testing.T) {
 		t.Errorf("deleted consumer span kind = %v, want %v", deleteConsumerSpan.SpanKind(), trace.SpanKindConsumer)
 	}
 	assertTracingSpan(t, spans, "process deleted avatar", deleteConsumerSpan.SpanContext().SpanID())
+	assertTracingSpanStatus(t, spans, "process "+event.AvatarUploadedRoutingKey, codes.Error)
+	assertTracingSpanStatus(t, spans, "process uploaded avatar", codes.Error)
 }
 
 func assertTracingSpan(
@@ -98,4 +114,16 @@ func assertTracingSpan(
 	t.Fatalf("span %q not found", name)
 
 	return nil
+}
+
+func assertTracingSpanStatus(t *testing.T, spans []sdktrace.ReadOnlySpan, name string, want codes.Code) {
+	t.Helper()
+
+	for _, span := range spans {
+		if span.Name() == name && span.Status().Code == want {
+			return
+		}
+	}
+
+	t.Errorf("span %q with status %v not found", name, want)
 }

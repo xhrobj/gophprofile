@@ -12,6 +12,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/xhrobj/gophprofile/internal/event"
@@ -161,7 +162,7 @@ func (p *Publisher) publish(
 	messageID string,
 	createdAt time.Time,
 	message any,
-) error {
+) (resultErr error) {
 	body, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("marshal %s event: %w", routingKey, err)
@@ -181,7 +182,14 @@ func (p *Publisher) publish(
 			attribute.String("messaging.message.id", messageID),
 		),
 	)
-	defer span.End()
+	defer func() {
+		if resultErr != nil {
+			span.RecordError(resultErr)
+			span.SetStatus(codes.Error, resultErr.Error())
+		}
+
+		span.End()
+	}()
 
 	headers := amqp.Table{}
 	otel.GetTextMapPropagator().Inject(ctx, amqpTableCarrier(headers))

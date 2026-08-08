@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
@@ -55,6 +56,10 @@ type ImageProcessor interface {
 type retryPolicy struct {
 	maxAttempts    int
 	initialBackoff time.Duration
+}
+
+type handledDeliveryError struct {
+	cause error
 }
 
 // Worker получает события из broker и обрабатывает аватары.
@@ -132,24 +137,43 @@ func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error
 	)
 	defer span.End()
 
+	var err error
 	switch item.RoutingKey() {
 	case event.AvatarUploadedRoutingKey:
-		return w.handleAvatarUploadedDelivery(ctx, item)
+		err = w.handleAvatarUploadedDelivery(ctx, item)
 	case event.AvatarDeletedRoutingKey:
-		return w.handleAvatarDeletedDelivery(ctx, item)
+		err = w.handleAvatarDeletedDelivery(ctx, item)
 	default:
-		return w.rejectInvalidMessage(ctx, item, fmt.Errorf("unsupported routing key %q", item.RoutingKey()))
+		err = w.rejectInvalidMessage(ctx, item, fmt.Errorf("unsupported routing key %q", item.RoutingKey()))
 	}
+
+	if err == nil {
+		return nil
+	}
+
+	recordSpanError(span, err)
+	var handledErr handledDeliveryError
+	if errors.As(err, &handledErr) {
+		return nil
+	}
+
+	return err
 }
 
-func (w *Worker) handleAvatarUploadedDelivery(ctx context.Context, item broker.Delivery) error {
+func (w *Worker) handleAvatarUploadedDelivery(ctx context.Context, item broker.Delivery) (resultErr error) {
 	message, err := decodeAvatarUploaded(item)
 	if err != nil {
 		return w.rejectInvalidMessage(ctx, item, err)
 	}
 
 	ctx, span := otel.Tracer(workerInstrumentationName).Start(ctx, "process uploaded avatar")
-	defer span.End()
+	defer func() {
+		if resultErr != nil {
+			recordSpanError(span, resultErr)
+		}
+
+		span.End()
+	}()
 
 	messageLogger := logger.WithMessageID(w.logger, message.MessageID).With(
 		slog.String("avatar_id", message.AvatarID),
@@ -177,6 +201,14 @@ func (w *Worker) handleAvatarUploadedDelivery(ctx context.Context, item broker.D
 	return nil
 }
 
+func (e handledDeliveryError) Error() string {
+	return e.cause.Error()
+}
+
+func (e handledDeliveryError) Unwrap() error {
+	return e.cause
+}
+
 func (w *Worker) handleAvatarClaimError(
 	ctx context.Context,
 	item broker.Delivery,
@@ -192,7 +224,7 @@ func (w *Worker) handleAvatarClaimError(
 		return fmt.Errorf("dead-letter unclaimed %s message: %w", event.AvatarUploadedRoutingKey, nackErr)
 	}
 
-	return nil
+	return handledDeliveryError{cause: claimErr}
 }
 
 func (w *Worker) ackDuplicateAvatarUpload(ctx context.Context, item broker.Delivery, lg *slog.Logger) error {
@@ -226,7 +258,7 @@ func (w *Worker) handleAvatarProcessingError(
 		return fmt.Errorf("dead-letter failed %s message: %w", event.AvatarUploadedRoutingKey, nackErr)
 	}
 
-	return nil
+	return handledDeliveryError{cause: processErr}
 }
 
 func (w *Worker) finishDeletedAvatarProcessing(
@@ -246,7 +278,7 @@ func (w *Worker) finishDeletedAvatarProcessing(
 			)
 		}
 
-		return nil
+		return handledDeliveryError{cause: cleanupErr}
 	}
 
 	if ackErr := item.Ack(); ackErr != nil {
@@ -256,14 +288,20 @@ func (w *Worker) finishDeletedAvatarProcessing(
 	return nil
 }
 
-func (w *Worker) handleAvatarDeletedDelivery(ctx context.Context, item broker.Delivery) error {
+func (w *Worker) handleAvatarDeletedDelivery(ctx context.Context, item broker.Delivery) (resultErr error) {
 	message, err := decodeAvatarDeleted(item)
 	if err != nil {
 		return w.rejectInvalidMessage(ctx, item, err)
 	}
 
 	ctx, span := otel.Tracer(workerInstrumentationName).Start(ctx, "process deleted avatar")
-	defer span.End()
+	defer func() {
+		if resultErr != nil {
+			recordSpanError(span, resultErr)
+		}
+
+		span.End()
+	}()
 
 	messageLogger := logger.WithMessageID(w.logger, message.MessageID).With(
 		slog.String("avatar_id", message.AvatarID),
@@ -283,7 +321,7 @@ func (w *Worker) handleAvatarDeletedDelivery(ctx context.Context, item broker.De
 			return fmt.Errorf("dead-letter failed %s message: %w", event.AvatarDeletedRoutingKey, nackErr)
 		}
 
-		return nil
+		return handledDeliveryError{cause: err}
 	}
 
 	if ackErr := item.Ack(); ackErr != nil {
@@ -307,7 +345,7 @@ func (w *Worker) rejectInvalidMessage(ctx context.Context, item broker.Delivery,
 		return fmt.Errorf("reject invalid broker message: %w", nackErr)
 	}
 
-	return nil
+	return handledDeliveryError{cause: err}
 }
 
 func (w *Worker) claimWithRetry(
@@ -420,7 +458,7 @@ func (w *Worker) requeueOnShutdown(
 			return fmt.Errorf("dead-letter %s message after failed shutdown recovery: %w", event.AvatarUploadedRoutingKey, nackErr)
 		}
 
-		return nil
+		return handledDeliveryError{cause: err}
 	}
 
 	lg.InfoContext(ctx, "released avatar claim during shutdown")
@@ -479,6 +517,16 @@ func (w *Worker) retryOperation(
 	}
 
 	return resultErr
+}
+
+func recordSpanError(span trace.Span, err error) {
+	var handledErr handledDeliveryError
+	if errors.As(err, &handledErr) {
+		err = handledErr.cause
+	}
+
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
 }
 
 func (p retryPolicy) backoff(failedAttempt int) time.Duration {

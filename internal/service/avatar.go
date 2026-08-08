@@ -20,26 +20,49 @@ const (
 
 // AvatarRepository описывает операции с метаданными аватаров, необходимые application-сервису.
 type AvatarRepository interface {
+	// Create сохраняет метаданные новой аватарки.
 	Create(ctx context.Context, avatar model.Avatar) (model.Avatar, error)
+
+	// GetByID возвращает аватарку по идентификатору.
 	GetByID(ctx context.Context, avatarID string) (model.Avatar, error)
+
+	// GetCurrentByUserID возвращает текущую аватарку пользователя.
 	GetCurrentByUserID(ctx context.Context, userID string) (model.Avatar, error)
+
+	// ListByUserID возвращает список аватарок пользователя.
 	ListByUserID(ctx context.Context, userID string) ([]model.Avatar, error)
+
+	// UpdateUploadStatus обновляет статус загрузки аватарки.
 	UpdateUploadStatus(ctx context.Context, avatarID string, status model.UploadStatus) error
+
+	// DeletePermanent безвозвратно удаляет метаданные аватарки.
 	DeletePermanent(ctx context.Context, avatarID string) error
+
+	// SoftDelete помечает аватарку удалённой.
 	SoftDelete(ctx context.Context, avatarID string) error
+
+	// RestoreDeleted восстанавливает ранее удалённую аватарку.
 	RestoreDeleted(ctx context.Context, avatarID string) error
 }
 
 // AvatarStorage описывает операции с объектным хранилищем, необходимые application-сервису.
 type AvatarStorage interface {
+	// Put сохраняет объект в хранилище.
 	Put(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
+
+	// Get открывает объект из хранилища для чтения.
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
+
+	// Delete удаляет объекты из хранилища по ключам.
 	Delete(ctx context.Context, keys ...string) error
 }
 
 // AvatarEventPublisher публикует события, необходимые application-сервису.
 type AvatarEventPublisher interface {
+	// PublishAvatarUploaded публикует событие об успешной загрузке аватарки.
 	PublishAvatarUploaded(ctx context.Context, avatar model.Avatar) error
+
+	// PublishAvatarDeleted публикует событие об удалении аватарки.
 	PublishAvatarDeleted(ctx context.Context, avatar model.Avatar) error
 }
 
@@ -83,9 +106,11 @@ func NewAvatarService(
 }
 
 // Upload создаёт метаданные аватарки, сохраняет оригинал и публикует событие для фоновой обработки.
-func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (model.Avatar, error) {
+func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (result model.Avatar, resultErr error) {
 	ctx, span := otel.Tracer(serviceInstrumentationName).Start(ctx, "upload avatar")
-	defer span.End()
+	defer func() {
+		finishSpan(span, resultErr)
+	}()
 
 	metadata, err := inspectImage(input.Content)
 	if err != nil {
@@ -132,6 +157,7 @@ func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (model.Av
 	return avatar, nil
 }
 
+// recoverStoreFailure помечает загрузку неуспешной после ошибки сохранения оригинала
 func (s *AvatarService) recoverStoreFailure(avatarID string, cause error) error {
 	resultErr := fmt.Errorf("store avatar original: %w", cause)
 
@@ -148,6 +174,7 @@ func (s *AvatarService) recoverStoreFailure(avatarID string, cause error) error 
 	return resultErr
 }
 
+// recoverUploadCompletionFailure помечает загрузку неуспешной и удаляет сохранённый оригинал
 func (s *AvatarService) recoverUploadCompletionFailure(avatarID, key string, cause error) error {
 	resultErr := fmt.Errorf("complete avatar upload: %w", cause)
 
@@ -171,6 +198,7 @@ func (s *AvatarService) recoverUploadCompletionFailure(avatarID, key string, cau
 	return resultErr
 }
 
+// rollbackPublishFailure откатывает метаданные и оригинал после ошибки публикации события
 func (s *AvatarService) rollbackPublishFailure(avatarID, key string, cause error) error {
 	resultErr := errors.Join(
 		ErrServiceUnavailable,

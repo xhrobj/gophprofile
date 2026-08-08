@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -47,10 +48,25 @@ func TestAvatarService_Tracing(t *testing.T) {
 		t.Fatalf("DeleteByID() error = %v", err)
 	}
 
-	parentSpan.End()
+	failedUploadService := newTestAvatarService(
+		&fakeAvatarRepository{createErr: errCreateMetadata},
+		&fakeAvatarStorage{},
+		&fakeAvatarEventPublisher{},
+	)
+	if _, err := failedUploadService.Upload(ctx, UploadInput{
+		UserID:   "Alice",
+		FileName: "avatar.png",
+		Content:  encodePNG(t),
+	}); err == nil {
+		t.Fatal("Upload() error = nil, want error")
+	}
 
-	assertChildSpan(t, spanRecorder.Ended(), "upload avatar", parentSpan.SpanContext().SpanID())
-	assertChildSpan(t, spanRecorder.Ended(), "delete avatar", parentSpan.SpanContext().SpanID())
+	parentSpan.End()
+	spans := spanRecorder.Ended()
+
+	assertChildSpan(t, spans, "upload avatar", parentSpan.SpanContext().SpanID())
+	assertChildSpan(t, spans, "delete avatar", parentSpan.SpanContext().SpanID())
+	assertSpanStatus(t, spans, "upload avatar", codes.Error)
 }
 
 func assertChildSpan(t *testing.T, spans []sdktrace.ReadOnlySpan, name string, parentID trace.SpanID) {
@@ -68,4 +84,16 @@ func assertChildSpan(t *testing.T, spans []sdktrace.ReadOnlySpan, name string, p
 	}
 
 	t.Errorf("span %q not found", name)
+}
+
+func assertSpanStatus(t *testing.T, spans []sdktrace.ReadOnlySpan, name string, want codes.Code) {
+	t.Helper()
+
+	for _, span := range spans {
+		if span.Name() == name && span.Status().Code == want {
+			return
+		}
+	}
+
+	t.Errorf("span %q with status %v not found", name, want)
 }
