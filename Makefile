@@ -90,7 +90,7 @@ run-worker: infra-up build-worker
 	$(WORKER)
 
 # собрать и запустить полный локальный стек приложения:
-# MinIO (S3), PostgreSQL, RabbitMQ, Сервер, Воркер, Jaeger, Prometheus, Loki, Alloy и Grafana через Docker Compose
+# MinIO (S3), PostgreSQL, RabbitMQ, Сервер, Воркер, Jaeger, Prometheus, Alertmanager, Loki, Alloy и Grafana через Docker Compose
 compose-up:
 	docker compose --profile observability up -d --build --wait
 

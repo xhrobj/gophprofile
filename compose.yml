@@ -77,11 +77,33 @@ services:
       - "127.0.0.1:9090:9090"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
+    depends_on:
+      alertmanager:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD-SHELL
         - wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  alertmanager:
+    image: prom/alertmanager:v0.33.1
+    container_name: gophprofile-alertmanager
+    profiles:
+      - observability
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1:9093/-/healthy || exit 1
       interval: 5s
       timeout: 5s
       retries: 5
@@ -221,6 +243,7 @@ volumes:
   minio-data:
   rabbitmq-data:
   prometheus-data:
+  alertmanager-data:
   loki-data:
   alloy-data:
   grafana-data:
