@@ -137,6 +137,7 @@ services:
       - "127.0.0.1:3000:3000"
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       jaeger:

@@ -16,6 +16,14 @@ datasources:
     uid: loki
     access: proxy
     url: http://loki:3100
+    jsonData:
+      derivedFields:
+        - datasourceUid: jaeger
+          matcherType: label
+          matcherRegex: trace_id
+          name: TraceID
+          url: '$${__value.raw}'
+          urlDisplayLabel: View trace
     editable: false
 
   - name: Jaeger
