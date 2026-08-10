@@ -63,7 +63,7 @@ func (s *AvatarService) deleteAvatar(ctx context.Context, avatar model.Avatar, r
 	}
 
 	if err := s.publisher.PublishAvatarDeleted(ctx, avatar); err != nil {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), deleteRollbackTimeout)
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deleteRollbackTimeout)
 		defer cancel()
 
 		rollbackErr := s.repository.RestoreDeleted(rollbackCtx, avatar.ID)

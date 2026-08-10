@@ -157,27 +157,27 @@ func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (result m
 		int64(len(input.Content)),
 		metadata.mimeType,
 	); err != nil {
-		return model.Avatar{}, s.recoverStoreFailure(avatar.ID, err)
+		return model.Avatar{}, s.recoverStoreFailure(ctx, avatar.ID, err)
 	}
 
 	if err := s.repository.UpdateUploadStatus(ctx, avatar.ID, model.UploadStatusCompleted); err != nil {
-		return model.Avatar{}, s.recoverUploadCompletionFailure(avatar.ID, key, err)
+		return model.Avatar{}, s.recoverUploadCompletionFailure(ctx, avatar.ID, key, err)
 	}
 
 	avatar.UploadStatus = model.UploadStatusCompleted
 
 	if err := s.publisher.PublishAvatarUploaded(ctx, avatar); err != nil {
-		return model.Avatar{}, s.rollbackPublishFailure(avatar.ID, key, err)
+		return model.Avatar{}, s.rollbackPublishFailure(ctx, avatar.ID, key, err)
 	}
 
 	return avatar, nil
 }
 
 // recoverStoreFailure помечает загрузку неуспешной после ошибки сохранения оригинала
-func (s *AvatarService) recoverStoreFailure(avatarID string, cause error) error {
+func (s *AvatarService) recoverStoreFailure(ctx context.Context, avatarID string, cause error) error {
 	resultErr := fmt.Errorf("store avatar original: %w", cause)
 
-	statusCtx, cancelStatus := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
+	statusCtx, cancelStatus := context.WithTimeout(context.WithoutCancel(ctx), uploadRecoveryTimeout)
 	statusErr := s.repository.UpdateUploadStatus(statusCtx, avatarID, model.UploadStatusFailed)
 	cancelStatus()
 	if statusErr != nil {
@@ -191,10 +191,10 @@ func (s *AvatarService) recoverStoreFailure(avatarID string, cause error) error 
 }
 
 // recoverUploadCompletionFailure помечает загрузку неуспешной и удаляет сохранённый оригинал
-func (s *AvatarService) recoverUploadCompletionFailure(avatarID, key string, cause error) error {
+func (s *AvatarService) recoverUploadCompletionFailure(ctx context.Context, avatarID, key string, cause error) error {
 	resultErr := fmt.Errorf("complete avatar upload: %w", cause)
 
-	statusCtx, cancelStatus := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
+	statusCtx, cancelStatus := context.WithTimeout(context.WithoutCancel(ctx), uploadRecoveryTimeout)
 	statusErr := s.repository.UpdateUploadStatus(statusCtx, avatarID, model.UploadStatusFailed)
 	cancelStatus()
 	if statusErr != nil {
@@ -204,7 +204,7 @@ func (s *AvatarService) recoverUploadCompletionFailure(avatarID, key string, cau
 		)
 	}
 
-	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), uploadRecoveryTimeout)
 	deleteErr := s.storage.Delete(cleanupCtx, key)
 	cancelCleanup()
 	if deleteErr != nil {
@@ -215,13 +215,13 @@ func (s *AvatarService) recoverUploadCompletionFailure(avatarID, key string, cau
 }
 
 // rollbackPublishFailure откатывает метаданные и оригинал после ошибки публикации события
-func (s *AvatarService) rollbackPublishFailure(avatarID, key string, cause error) error {
+func (s *AvatarService) rollbackPublishFailure(ctx context.Context, avatarID, key string, cause error) error {
 	resultErr := errors.Join(
 		ErrServiceUnavailable,
 		fmt.Errorf("publish avatar uploaded event: %w", cause),
 	)
 
-	metadataCtx, cancelMetadata := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
+	metadataCtx, cancelMetadata := context.WithTimeout(context.WithoutCancel(ctx), uploadRecoveryTimeout)
 	deleteMetadataErr := s.repository.DeletePermanent(metadataCtx, avatarID)
 	cancelMetadata()
 	if deleteMetadataErr != nil {
@@ -231,7 +231,7 @@ func (s *AvatarService) rollbackPublishFailure(avatarID, key string, cause error
 		)
 	}
 
-	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), uploadRecoveryTimeout)
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), uploadRecoveryTimeout)
 	deleteOriginalErr := s.storage.Delete(cleanupCtx, key)
 	cancelCleanup()
 	if deleteOriginalErr != nil {

@@ -132,6 +132,11 @@ func TestTracing_DropsTelemetryNoise(t *testing.T) {
 		noiseSpan.End()
 	}
 
+	suppressedCtx, suppressedSpan := tracer.Start(suppressTracing(context.Background()), "storage usage query")
+	_, suppressedChild := tracer.Start(suppressedCtx, "SELECT")
+	suppressedChild.End()
+	suppressedSpan.End()
+
 	requestCtx, requestSpan := tracer.Start(
 		context.Background(),
 		"POST",
@@ -150,7 +155,8 @@ func TestTracing_DropsTelemetryNoise(t *testing.T) {
 	}
 
 	for _, span := range exporter.spans {
-		if span.Name() == "GET" || span.Name() == "HTTP HEAD" {
+		if span.Name() == "GET" || span.Name() == "HTTP HEAD" ||
+			span.Name() == "storage usage query" || span.Name() == "SELECT" {
 			t.Errorf("telemetry-noise span %q was exported", span.Name())
 		}
 	}

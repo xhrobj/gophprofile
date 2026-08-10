@@ -183,7 +183,7 @@ func (m *ServerMetrics) RegisterAvatarStorageUsage(reader AvatarStorageUsageRead
 			Help:      "Total size in bytes of completed, non-deleted avatar originals recorded in PostgreSQL.",
 		},
 		func() float64 {
-			ctx, cancel := context.WithTimeout(context.Background(), storageUsageQueryTimeout)
+			ctx, cancel := context.WithTimeout(suppressTracing(context.Background()), storageUsageQueryTimeout)
 			defer cancel()
 
 			usage, err := reader.StorageUsageBytes(ctx)

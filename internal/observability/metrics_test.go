@@ -14,6 +14,7 @@ import (
 type storageUsageReader struct {
 	usage int64
 	err   error
+	ctx   context.Context
 }
 
 func TestServerMetrics_HTTP(t *testing.T) {
@@ -62,18 +63,22 @@ func TestServerMetrics_AvatarOperations(t *testing.T) {
 
 func TestServerMetrics_AvatarStorageUsage(t *testing.T) {
 	metrics := NewServerMetrics()
-	metrics.RegisterAvatarStorageUsage(storageUsageReader{usage: 4096})
+	reader := &storageUsageReader{usage: 4096}
+	metrics.RegisterAvatarStorageUsage(reader)
 
 	body := metricsBody(t, metrics.Handler())
 
 	if !strings.Contains(body, `gophprofile_avatar_storage_usage_bytes 4096`) {
 		t.Errorf("metrics output does not contain avatar storage usage")
 	}
+	if reader.ctx == nil || !tracingSuppressed(reader.ctx) {
+		t.Error("storage usage query context does not suppress tracing")
+	}
 }
 
 func TestServerMetrics_AvatarStorageUsage_Error(t *testing.T) {
 	metrics := NewServerMetrics()
-	metrics.RegisterAvatarStorageUsage(storageUsageReader{err: context.DeadlineExceeded})
+	metrics.RegisterAvatarStorageUsage(&storageUsageReader{err: context.DeadlineExceeded})
 
 	body := metricsBody(t, metrics.Handler())
 
@@ -159,7 +164,9 @@ func TestNewWorkerMetrics_UsesIndependentRegistry(t *testing.T) {
 	}
 }
 
-func (s storageUsageReader) StorageUsageBytes(context.Context) (int64, error) {
+func (s *storageUsageReader) StorageUsageBytes(ctx context.Context) (int64, error) {
+	s.ctx = ctx
+
 	return s.usage, s.err
 }
 

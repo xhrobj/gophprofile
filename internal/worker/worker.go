@@ -432,7 +432,7 @@ func (w *Worker) deleteKeysWithRetry(ctx context.Context, lg *slog.Logger, keys 
 }
 
 func (w *Worker) finalizeFailure(ctx context.Context, lg *slog.Logger, message event.AvatarUploaded) {
-	statusCtx, cancelStatus := context.WithTimeout(context.Background(), recoveryTimeout)
+	statusCtx, cancelStatus := context.WithTimeout(context.WithoutCancel(ctx), recoveryTimeout)
 	if err := w.updateProcessingStatusWithRetry(
 		statusCtx,
 		lg,
@@ -443,7 +443,7 @@ func (w *Worker) finalizeFailure(ctx context.Context, lg *slog.Logger, message e
 	}
 	cancelStatus()
 
-	cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), recoveryTimeout)
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), recoveryTimeout)
 	defer cancelCleanup()
 
 	if err := w.deleteKeysWithRetry(cleanupCtx, lg, thumbnailKeys(message)...); err != nil {
@@ -457,7 +457,7 @@ func (w *Worker) requeueOnShutdown(
 	lg *slog.Logger,
 	avatarID string,
 ) error {
-	recoveryCtx, cancel := context.WithTimeout(context.Background(), recoveryTimeout)
+	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recoveryTimeout)
 	defer cancel()
 
 	if err := w.updateProcessingStatusWithRetry(

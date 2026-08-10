@@ -18,6 +18,12 @@ type telemetryNoiseSampler struct {
 	fallback sdktrace.Sampler
 }
 
+type suppressTracingSampler struct {
+	fallback sdktrace.Sampler
+}
+
+type suppressTracingContextKey struct{}
+
 // Tracing управляет жизненным циклом трассировки приложения.
 type Tracing struct {
 	provider *sdktrace.TracerProvider
@@ -103,12 +109,35 @@ func (s telemetryNoiseSampler) ShouldSample(params sdktrace.SamplingParameters) 
 	return s.fallback.ShouldSample(params)
 }
 
+func suppressTracing(ctx context.Context) context.Context {
+	return context.WithValue(ctx, suppressTracingContextKey{}, true)
+}
+
+func tracingSuppressed(ctx context.Context) bool {
+	suppressed, _ := ctx.Value(suppressTracingContextKey{}).(bool)
+
+	return suppressed
+}
+
 func (s telemetryNoiseSampler) Description() string {
 	return "TelemetryNoiseSampler"
 }
 
+func (s suppressTracingSampler) ShouldSample(params sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	if tracingSuppressed(params.ParentContext) {
+		return sdktrace.NeverSample().ShouldSample(params)
+	}
+
+	return s.fallback.ShouldSample(params)
+}
+
+func (s suppressTracingSampler) Description() string {
+	return "SuppressTracingSampler"
+}
+
 func installTracing(res *resource.Resource, exporter sdktrace.SpanExporter) *Tracing {
-	sampler := sdktrace.ParentBased(telemetryNoiseSampler{fallback: sdktrace.AlwaysSample()})
+	rootSampler := telemetryNoiseSampler{fallback: sdktrace.AlwaysSample()}
+	sampler := suppressTracingSampler{fallback: sdktrace.ParentBased(rootSampler)}
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
