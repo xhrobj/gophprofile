@@ -1,4 +1,4 @@
-# Техническое задание на спринт
+# Техническое задание
 
 ## О проекте
 
@@ -8,8 +8,8 @@
 
 В вашем портфолио появится сервис, который решает реальную продуктовую задачу: позволяет загружать, хранить, обрабатывать и раздавать контент через REST API. Вы построите его на востребованном стеке: Go, PostgreSQL, S3, RabbitMQ/Kafka, а затем упакуете в Docker и Kubernetes с полноценным Observability (Prometheus, Grafana, Loki/ELK/OpenSearch, Jaeger).
 
-<a href="images/GophProfile.png">
-  <img src="images/GophProfile-preview.jpg" alt="GophProfile">
+<a href="images/spec/GophProfile.png">
+  <img src="images/spec/GophProfile-preview.jpg" alt="GophProfile">
 </a>
 
 Проект масштабный, поэтому мы разделили его на три спринта. В начале каждого спринта вы получите техническое задание с перечнем задач на текущий этап.
@@ -22,5 +22,5 @@
 
 ## Задания по спринтам
 
-![Техническое задание на 11 спринт](docs/sprints/11-mvp.md)
-![Техническое задание на 12 спринт](docs/sprints/12-observability.md)
+- [Техническое задание на 11 спринт](sprints/11-mvp.md)
+- [Техническое задание на 12 спринт](sprints/12-observability.md)
