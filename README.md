@@ -1,8 +1,10 @@
 # 👤 [(^.^)] GophProfile
 
+[![(-_-) Go CI](https://github.com/xhrobj/gophprofile/actions/workflows/go-ci.yaml/badge.svg)](https://github.com/xhrobj/gophprofile/actions/workflows/go-ci.yaml)
+
 [![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=xhrobj_gophprofile&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=xhrobj_gophprofile)
 
-[![Quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=xhrobj_gophprofile)](https://sonarcloud.io/summary/new_code?id=xhrobj_gophprofile)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=xhrobj_gophprofile&metric=coverage)](https://sonarcloud.io/summary/new_code?id=xhrobj_gophprofile)
 
 GophProfile — сервис для загрузки, хранения, асинхронной обработки и выдачи пользовательских аватаров. Метаданные хранятся в PostgreSQL, оригиналы и миниатюры — в S3-совместимом MinIO, а Server и Worker обмениваются событиями через RabbitMQ.
 
