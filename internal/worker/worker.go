@@ -53,8 +53,8 @@ type ImageProcessor interface {
 	Process(reader io.Reader) ([]imageprocessor.Thumbnail, error)
 }
 
-// Metrics описывает метрики обработки событий Воркером.
-type Metrics interface {
+// ProcessedEventObserver наблюдает за результатами обработки событий Воркером.
+type ProcessedEventObserver interface {
 	// ObserveProcessedEvent учитывает результат и длительность обработки broker event.
 	ObserveProcessedEvent(event string, success bool, duration time.Duration)
 }
@@ -74,7 +74,7 @@ type Worker struct {
 	repository     Repository
 	storage        Storage
 	imageProcessor ImageProcessor
-	metrics        Metrics
+	metrics        ProcessedEventObserver
 	logger         *slog.Logger
 	retry          retryPolicy
 }
@@ -85,7 +85,7 @@ func New(
 	repository Repository,
 	storage Storage,
 	imageProcessor ImageProcessor,
-	metrics Metrics,
+	metrics ProcessedEventObserver,
 	lg *slog.Logger,
 ) *Worker {
 	return &Worker{

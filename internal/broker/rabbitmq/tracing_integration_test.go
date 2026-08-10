@@ -21,19 +21,7 @@ func TestIntegration_RabbitMQTracePropagation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), rabbitMQIntegrationTestTimeout)
 	t.Cleanup(cancel)
 
-	previousProvider := otel.GetTracerProvider()
-	previousPropagator := otel.GetTextMapPropagator()
-	spanRecorder := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
-	otel.SetTracerProvider(provider)
-	otel.SetTextMapPropagator(propagation.TraceContext{})
-	t.Cleanup(func() {
-		otel.SetTracerProvider(previousProvider)
-		otel.SetTextMapPropagator(previousPropagator)
-		if err := provider.Shutdown(context.Background()); err != nil {
-			t.Errorf("shutdown tracer provider: %v", err)
-		}
-	})
+	provider, spanRecorder := setupTracing(t)
 
 	url := requireEnv(t, "RABBITMQ_URL")
 	exchange, queue := uniqueTopologyNames()
@@ -67,23 +55,54 @@ func TestIntegration_RabbitMQTracePropagation(t *testing.T) {
 	}
 
 	ctx, parentSpan := provider.Tracer("rabbitmq-test").Start(ctx, "request")
+	defer parentSpan.End()
 	avatar := model.Avatar{
 		ID:     "c0decafe-babe-4bed-b042-feeddeadbeef",
 		UserID: "Alice",
 		S3Key:  "originals/Alice/c0decafe-babe-4bed-b042-feeddeadbeef/avatar.webp",
 	}
 	if err := publisher.PublishAvatarUploaded(ctx, avatar); err != nil {
-		parentSpan.End()
 		t.Fatalf("PublishAvatarUploaded() error = %v", err)
 	}
 
 	item := receiveDelivery(t, ctx, deliveries)
 	if err := item.Ack(); err != nil {
-		parentSpan.End()
 		t.Fatalf("Ack() error = %v", err)
 	}
 
-	producerSpan := findSpan(t, spanRecorder.Ended(), "send "+exchange+":"+event.AvatarUploadedRoutingKey)
+	assertTracePropagation(t, spanRecorder.Ended(), parentSpan, exchange, item.Headers())
+}
+
+func setupTracing(t *testing.T) (*sdktrace.TracerProvider, *tracetest.SpanRecorder) {
+	t.Helper()
+
+	previousProvider := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	spanRecorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
+		if err := provider.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown tracer provider: %v", err)
+		}
+	})
+
+	return provider, spanRecorder
+}
+
+func assertTracePropagation(
+	t *testing.T,
+	spans []sdktrace.ReadOnlySpan,
+	parentSpan trace.Span,
+	exchange string,
+	headers map[string]string,
+) {
+	t.Helper()
+
+	producerSpan := findSpan(t, spans, "send "+exchange+":"+event.AvatarUploadedRoutingKey)
 	if producerSpan.SpanKind() != trace.SpanKindProducer {
 		t.Errorf("producer span kind = %v, want %v", producerSpan.SpanKind(), trace.SpanKindProducer)
 	}
@@ -91,12 +110,12 @@ func TestIntegration_RabbitMQTracePropagation(t *testing.T) {
 		t.Errorf("producer parent span ID = %s, want %s", got, parentSpan.SpanContext().SpanID())
 	}
 
-	headers := propagation.MapCarrier(item.Headers())
-	if headers.Get("traceparent") == "" {
+	carrier := propagation.MapCarrier(headers)
+	if carrier.Get("traceparent") == "" {
 		t.Fatal("RabbitMQ delivery traceparent header is empty")
 	}
 
-	extracted := propagation.TraceContext{}.Extract(context.Background(), headers)
+	extracted := propagation.TraceContext{}.Extract(context.Background(), carrier)
 	messageSpanContext := trace.SpanContextFromContext(extracted)
 	if !messageSpanContext.IsRemote() {
 		t.Error("extracted message span context is not remote")
@@ -107,8 +126,6 @@ func TestIntegration_RabbitMQTracePropagation(t *testing.T) {
 	if got := messageSpanContext.SpanID(); got != producerSpan.SpanContext().SpanID() {
 		t.Errorf("message parent span ID = %s, want producer span ID %s", got, producerSpan.SpanContext().SpanID())
 	}
-
-	parentSpan.End()
 }
 
 func findSpan(t *testing.T, spans []sdktrace.ReadOnlySpan, name string) sdktrace.ReadOnlySpan {
