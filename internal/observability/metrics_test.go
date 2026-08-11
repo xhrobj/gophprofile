@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,9 +13,10 @@ import (
 )
 
 type storageUsageReader struct {
-	usage int64
-	err   error
-	ctx   context.Context
+	usage    int64
+	err      error
+	calls    atomic.Int32
+	contexts chan context.Context
 }
 
 func TestServerMetrics_HTTP(t *testing.T) {
@@ -62,29 +64,43 @@ func TestServerMetrics_AvatarOperations(t *testing.T) {
 }
 
 func TestServerMetrics_AvatarStorageUsage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
 	metrics := NewServerMetrics()
-	reader := &storageUsageReader{usage: 4096}
-	metrics.RegisterAvatarStorageUsage(reader)
-
-	body := metricsBody(t, metrics.Handler())
-
-	if !strings.Contains(body, `gophprofile_avatar_storage_usage_bytes 4096`) {
-		t.Errorf("metrics output does not contain avatar storage usage")
+	reader := &storageUsageReader{
+		usage:    4096,
+		contexts: make(chan context.Context, 1),
 	}
-	if reader.ctx == nil || !tracingSuppressed(reader.ctx) {
+	metrics.RegisterAvatarStorageUsage(ctx, reader)
+
+	queryCtx := waitStorageUsageQuery(t, reader)
+	waitMetricContains(t, metrics.Handler(), `gophprofile_avatar_storage_usage_bytes 4096`)
+	if !tracingSuppressed(queryCtx) {
 		t.Error("storage usage query context does not suppress tracing")
+	}
+
+	callsBeforeScrape := reader.calls.Load()
+	metricsBody(t, metrics.Handler())
+	metricsBody(t, metrics.Handler())
+	if callsAfterScrape := reader.calls.Load(); callsAfterScrape != callsBeforeScrape {
+		t.Errorf("StorageUsageBytes() calls after scrape = %d, want %d", callsAfterScrape, callsBeforeScrape)
 	}
 }
 
 func TestServerMetrics_AvatarStorageUsage_Error(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
 	metrics := NewServerMetrics()
-	metrics.RegisterAvatarStorageUsage(&storageUsageReader{err: context.DeadlineExceeded})
-
-	body := metricsBody(t, metrics.Handler())
-
-	if !strings.Contains(body, `gophprofile_avatar_storage_usage_bytes NaN`) {
-		t.Errorf("metrics output does not contain NaN avatar storage usage")
+	reader := &storageUsageReader{
+		err:      context.DeadlineExceeded,
+		contexts: make(chan context.Context, 1),
 	}
+	metrics.RegisterAvatarStorageUsage(ctx, reader)
+
+	waitStorageUsageQuery(t, reader)
+	waitMetricContains(t, metrics.Handler(), `gophprofile_avatar_storage_usage_bytes NaN`)
 }
 
 func TestServerMetrics_PostgreSQLPool(t *testing.T) {
@@ -165,9 +181,43 @@ func TestNewWorkerMetrics_UsesIndependentRegistry(t *testing.T) {
 }
 
 func (s *storageUsageReader) StorageUsageBytes(ctx context.Context) (int64, error) {
-	s.ctx = ctx
+	s.calls.Add(1)
+	if s.contexts != nil {
+		select {
+		case s.contexts <- ctx:
+		default:
+		}
+	}
 
 	return s.usage, s.err
+}
+
+func waitStorageUsageQuery(t *testing.T, reader *storageUsageReader) context.Context {
+	t.Helper()
+
+	select {
+	case ctx := <-reader.contexts:
+		return ctx
+	case <-time.After(time.Second):
+		t.Fatal("StorageUsageBytes() was not called")
+
+		return nil
+	}
+}
+
+func waitMetricContains(t *testing.T, handler http.Handler, want string) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(metricsBody(t, handler), want) {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("metrics output does not contain %q", want)
 }
 
 func metricsBody(t *testing.T, handler http.Handler) string {

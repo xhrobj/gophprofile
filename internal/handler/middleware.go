@@ -66,6 +66,9 @@ func newRequestID() (string, error) {
 
 func traceRouteMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// NOTE: chi формирует полный RoutePattern во время маршрутизации, поэтому читаем его уже после handler ..
+		// см. коммент над func RoutePattern:
+		// https://github.com/go-chi/chi/blob/master/context.go#L123
 		next.ServeHTTP(w, r)
 
 		routePattern := chi.RouteContext(r.Context()).RoutePattern()

@@ -1,4 +1,3 @@
-// Package worker выполняет асинхронную обработку аватаров.
 package worker
 
 import (
@@ -64,6 +63,8 @@ type retryPolicy struct {
 	initialBackoff time.Duration
 }
 
+// handledDeliveryError помечает ошибку сообщения, уже отправленного в dead-letter:
+// она сохраняется в trace, но не должна завершать Worker.Run
 type handledDeliveryError struct {
 	cause error
 }
@@ -157,7 +158,7 @@ func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error
 		err = w.rejectInvalidMessage(ctx, item, fmt.Errorf("unsupported routing key %q", item.RoutingKey()))
 	}
 
-	if w.metrics != nil && (ctx.Err() == nil || err != nil) {
+	if w.metrics != nil && shouldRecordMetrics(ctx, err) {
 		w.metrics.ObserveProcessedEvent(item.RoutingKey(), err == nil, time.Since(startedAt))
 	}
 
@@ -172,6 +173,14 @@ func (w *Worker) handleDelivery(ctx context.Context, item broker.Delivery) error
 	}
 
 	return err
+}
+
+func shouldRecordMetrics(ctx context.Context, err error) bool {
+	if ctx.Err() != nil && err == nil {
+		return false
+	}
+
+	return true
 }
 
 func (w *Worker) handleAvatarUploadedDelivery(ctx context.Context, item broker.Delivery) (resultErr error) {

@@ -215,6 +215,36 @@ func TestWorker_HandleDelivery_RecordsMetrics(t *testing.T) {
 	}
 }
 
+func TestShouldRecordMetrics(t *testing.T) {
+	processingErr := errors.New("processing failed")
+	tests := []struct {
+		name     string
+		canceled bool
+		err      error
+		want     bool
+	}{
+		{name: "active context without error", want: true},
+		{name: "active context with error", err: processingErr, want: true},
+		{name: "canceled context without error", canceled: true, want: false},
+		{name: "canceled context with error", canceled: true, err: processingErr, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tt.canceled {
+				canceledCtx, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = canceledCtx
+			}
+
+			if got := shouldRecordMetrics(ctx, tt.err); got != tt.want {
+				t.Errorf("shouldRecordMetrics() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWorker_HandleDelivery_RetriesClaim(t *testing.T) {
 	errPostgreSQLUnavailable := errors.New("PostgreSQL unavailable")
 	repository := &fakeRepository{

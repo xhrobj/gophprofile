@@ -16,14 +16,15 @@ import (
 )
 
 const (
-	metricsNamespace         = "gophprofile"
-	unknownRoute             = "unmatched"
-	unknownMethod            = "OTHER"
-	unknownStatusClass       = "other"
-	unknownEvent             = "unknown"
-	metricResultSuccess      = "success"
-	metricResultError        = "error"
-	storageUsageQueryTimeout = time.Second
+	metricsNamespace            = "gophprofile"
+	unknownRoute                = "unmatched"
+	unknownMethod               = "OTHER"
+	unknownStatusClass          = "other"
+	unknownEvent                = "unknown"
+	metricResultSuccess         = "success"
+	metricResultError           = "error"
+	storageUsageQueryTimeout    = time.Second
+	storageUsageRefreshInterval = 30 * time.Second
 )
 
 // AvatarStorageUsageReader возвращает логический объём оригиналов аватаров из источника истины.
@@ -173,27 +174,51 @@ func NewWorkerMetrics() *WorkerMetrics {
 	return metrics
 }
 
-// RegisterAvatarStorageUsage добавляет метрику логического объёма оригиналов из PostgreSQL.
-func (m *ServerMetrics) RegisterAvatarStorageUsage(reader AvatarStorageUsageReader) {
-	m.registry.MustRegister(prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Namespace: metricsNamespace,
-			Subsystem: "avatar",
-			Name:      "storage_usage_bytes",
-			Help:      "Total size in bytes of completed, non-deleted avatar originals recorded in PostgreSQL.",
-		},
-		func() float64 {
-			ctx, cancel := context.WithTimeout(suppressTracing(context.Background()), storageUsageQueryTimeout)
-			defer cancel()
+// RegisterAvatarStorageUsage добавляет кэшированную метрику логического объёма оригиналов из PostgreSQL.
+func (m *ServerMetrics) RegisterAvatarStorageUsage(ctx context.Context, reader AvatarStorageUsageReader) {
+	gauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: metricsNamespace,
+		Subsystem: "avatar",
+		Name:      "storage_usage_bytes",
+		Help:      "Total size in bytes of completed, non-deleted avatar originals recorded in PostgreSQL.",
+	})
+	gauge.Set(math.NaN())
+	m.registry.MustRegister(gauge)
 
-			usage, err := reader.StorageUsageBytes(ctx)
-			if err != nil {
-				return math.NaN()
-			}
+	go updateAvatarStorageUsage(ctx, gauge, reader)
+}
 
-			return float64(usage)
-		},
-	))
+func updateAvatarStorageUsage(ctx context.Context, gauge prometheus.Gauge, reader AvatarStorageUsageReader) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	refreshAvatarStorageUsage(ctx, gauge, reader)
+	ticker := time.NewTicker(storageUsageRefreshInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refreshAvatarStorageUsage(ctx, gauge, reader)
+		}
+	}
+}
+
+func refreshAvatarStorageUsage(ctx context.Context, gauge prometheus.Gauge, reader AvatarStorageUsageReader) {
+	queryCtx, cancel := context.WithTimeout(suppressTracing(ctx), storageUsageQueryTimeout)
+	defer cancel()
+
+	usage, err := reader.StorageUsageBytes(queryCtx)
+	if err != nil {
+		gauge.Set(math.NaN())
+
+		return
+	}
+
+	gauge.Set(float64(usage))
 }
 
 // RegisterPostgreSQLPool добавляет метрики пула подключений PostgreSQL.

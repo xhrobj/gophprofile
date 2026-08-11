@@ -112,7 +112,7 @@ func run(ctx context.Context) error {
 	metrics.RegisterPostgreSQLPool(pool)
 
 	avatarRepository := postgres.NewAvatarRepository(pool)
-	metrics.RegisterAvatarStorageUsage(avatarRepository)
+	metrics.RegisterAvatarStorageUsage(ctx, avatarRepository)
 	avatarService := service.NewAvatarService(
 		avatarRepository,
 		storage,
