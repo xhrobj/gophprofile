@@ -12,7 +12,7 @@ import (
 func TestAvatarService_GetMetadata(t *testing.T) {
 	want := model.Avatar{ID: avatarID42, UserID: "Alice"}
 	repository := &downloadRepository{avatar: want}
-	avatarService := NewAvatarService(repository, &downloadStorage{}, &fakeAvatarEventPublisher{}, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+	avatarService := NewAvatarService(repository, &downloadStorage{}, &fakeAvatarEventPublisher{}, nil, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 
 	got, err := avatarService.GetMetadata(context.Background(), avatarID42)
 	if err != nil {
@@ -28,7 +28,7 @@ func TestAvatarService_GetMetadata(t *testing.T) {
 
 func TestAvatarService_GetMetadata_Error(t *testing.T) {
 	repository := &downloadRepository{err: model.ErrAvatarNotFound}
-	avatarService := NewAvatarService(repository, &downloadStorage{}, &fakeAvatarEventPublisher{}, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+	avatarService := NewAvatarService(repository, &downloadStorage{}, &fakeAvatarEventPublisher{}, nil, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 
 	_, err := avatarService.GetMetadata(context.Background(), avatarID42)
 	if !errors.Is(err, model.ErrAvatarNotFound) {
@@ -39,7 +39,7 @@ func TestAvatarService_GetMetadata_Error(t *testing.T) {
 func TestAvatarService_ListByUserID(t *testing.T) {
 	want := []model.Avatar{{ID: avatarID42, UserID: "Alice"}}
 	repository := &downloadRepository{avatars: want}
-	avatarService := NewAvatarService(repository, &downloadStorage{}, &fakeAvatarEventPublisher{}, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+	avatarService := NewAvatarService(repository, &downloadStorage{}, &fakeAvatarEventPublisher{}, nil, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 
 	got, err := avatarService.ListByUserID(context.Background(), "Alice")
 	if err != nil {
@@ -56,7 +56,7 @@ func TestAvatarService_ListByUserID(t *testing.T) {
 func TestAvatarService_ListByUserID_Error(t *testing.T) {
 	wantErr := errors.New("list avatars")
 	repository := &downloadRepository{listErr: wantErr}
-	avatarService := NewAvatarService(repository, &downloadStorage{}, &fakeAvatarEventPublisher{}, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+	avatarService := NewAvatarService(repository, &downloadStorage{}, &fakeAvatarEventPublisher{}, nil, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 
 	_, err := avatarService.ListByUserID(context.Background(), "Alice")
 	if !errors.Is(err, wantErr) {

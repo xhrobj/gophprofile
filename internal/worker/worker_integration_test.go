@@ -11,6 +11,8 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
+	"log/slog"
 	"os"
 	"strconv"
 	"testing"
@@ -21,7 +23,6 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	amqp "github.com/rabbitmq/amqp091-go"
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/broker"
 	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
@@ -37,7 +38,7 @@ import (
 const (
 	workerComponentTestTimeout = 30 * time.Second
 	workerTestAvatarID         = "c0decafe-babe-4bed-b042-feeddeadbeef"
-	workerTestMessageID        = "c0decafe-babe-4bed-b043-feeddeadbeef"
+	workerTestMessageID        = "deadbeef-f00d-4dad-b042-c0decafe0bad"
 )
 
 type ackObserverConsumer struct {
@@ -97,7 +98,8 @@ func TestComponent_WorkerAvatarProcessing(t *testing.T) {
 		repository,
 		storage,
 		imageprocessor.New(),
-		zap.NewNop(),
+		nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan error, 1)

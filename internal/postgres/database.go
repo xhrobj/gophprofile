@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -20,7 +21,18 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	connectCtx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 
-	pool, err := pgxpool.New(connectCtx, dsn)
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("create PostgreSQL pool: %w", err)
+	}
+
+	config.ConnConfig.Tracer = otelpgx.NewTracer(
+		otelpgx.WithDisableAcquireTracer(),
+		otelpgx.WithDisableQuerySpanNamePrefix(),
+		otelpgx.WithTrimSQLInSpanName(),
+	)
+
+	pool, err := pgxpool.NewWithConfig(connectCtx, config)
 	if err != nil {
 		return nil, fmt.Errorf("create PostgreSQL pool: %w", err)
 	}

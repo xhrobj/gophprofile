@@ -21,12 +21,13 @@ ENV_FILE ?= .env
 # строка подключения приложения к локальному PostgreSQL
 DATABASE_DSN ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 
-export POSTGRES_DB POSTGRES_PASSWORD POSTGRES_PORT POSTGRES_USER
 export DATABASE_DSN
+export POSTGRES_DB POSTGRES_PASSWORD POSTGRES_PORT POSTGRES_USER
 export S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET S3_USE_SSL
 export RABBITMQ_USER RABBITMQ_PASSWORD RABBITMQ_URL RABBITMQ_EXCHANGE RABBITMQ_QUEUE
+export TRACING_ENABLED OTEL_EXPORTER_OTLP_ENDPOINT
+export HTTP_ADDRESS MAX_UPLOAD_SIZE WORKER_METRICS_ADDRESS SHUTDOWN_TIMEOUT
 export LOG_LEVEL
-export HTTP_ADDRESS MAX_UPLOAD_SIZE SHUTDOWN_TIMEOUT
 
 # каталоги для артефактов сборки и пути к бинарникам
 BIN_DIR := bin
@@ -67,37 +68,39 @@ s3-up:
 rabbitmq-up:
 	docker compose up -d --wait rabbitmq
 
-# запустить локальную инфраструктуру и дождаться ее готовности
+# поднять внешние зависимости приложения
 infra-up: db-up s3-up rabbitmq-up
 
-# остановить контейнеры локальной инфраструктуры
+# остановить внешние зависимости приложения
 infra-down:
 	docker compose stop postgres minio rabbitmq
 
 # удалить контейнеры, сети и локальные данные Docker Compose
 infra-erase:
-	docker compose down -v
+	docker compose --profile observability down -v
 
 # собрать и запустить Сервер
 run-server: infra-up build-server
+	docker compose --profile observability up -d --wait jaeger
 	$(SERVER)
 
 # собрать и запустить Воркер
 run-worker: infra-up build-worker
+	docker compose --profile observability up -d --wait jaeger
 	$(WORKER)
 
 # собрать и запустить полный локальный стек приложения:
-# MinIO (S3), PostgreSQL, RabbitMQ, Сервер и Воркер через Docker Compose
+# MinIO (S3), PostgreSQL, RabbitMQ, Сервер, Воркер, Jaeger, Prometheus, Alertmanager, Loki, Alloy и Grafana через Docker Compose
 compose-up:
-	docker compose up -d --build --wait
+	docker compose --profile observability up -d --build --wait
 
 # остановить и удалить контейнеры и сети Docker Compose без удаления данных
 compose-down:
-	docker compose down
+	docker compose --profile observability down
 
 # показать логи сервисов Docker Compose
 compose-logs:
-	docker compose logs -f
+	docker compose --profile observability logs -f
 
 # запустить обычные и интеграционные тесты
 test-all: test-race test-integration

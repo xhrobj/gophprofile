@@ -44,17 +44,37 @@ func TestAvatarService_Download(t *testing.T) {
 		wantKey         string
 		wantContentType string
 	}{
-		{name: "gets original by ID", input: DownloadInput{AvatarID: avatarID42}, wantKey: "original.png", wantContentType: "image/png"},
-		{name: "gets explicit original by user", input: DownloadInput{UserID: "Alice", Size: OriginalAvatarSize}, wantKey: "original.png", wantContentType: "image/png"},
-		{name: "gets small thumbnail", input: DownloadInput{AvatarID: avatarID42, Size: "100x100"}, wantKey: "100.jpg", wantContentType: "image/jpeg"},
-		{name: "gets large thumbnail", input: DownloadInput{AvatarID: avatarID42, Size: "300x300"}, wantKey: "300.jpg", wantContentType: "image/jpeg"},
+		{
+			name:            "gets original by ID",
+			input:           DownloadInput{AvatarID: avatarID42},
+			wantKey:         "original.png",
+			wantContentType: "image/png",
+		},
+		{
+			name:            "gets explicit original by user",
+			input:           DownloadInput{UserID: "Alice", Size: OriginalAvatarSize},
+			wantKey:         "original.png",
+			wantContentType: "image/png",
+		},
+		{
+			name:            "gets small thumbnail",
+			input:           DownloadInput{AvatarID: avatarID42, Size: "100x100"},
+			wantKey:         "100.jpg",
+			wantContentType: "image/jpeg",
+		},
+		{
+			name:            "gets large thumbnail",
+			input:           DownloadInput{AvatarID: avatarID42, Size: "300x300"},
+			wantKey:         "300.jpg",
+			wantContentType: "image/jpeg",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repository := &downloadRepository{avatar: avatar}
 			storage := &downloadStorage{content: []byte("image")}
-			avatarService := NewAvatarService(repository, storage, &fakeAvatarEventPublisher{}, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+			avatarService := NewAvatarService(repository, storage, &fakeAvatarEventPublisher{}, nil, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 
 			output, err := avatarService.Download(context.Background(), tt.input)
 			if err != nil {
@@ -91,17 +111,38 @@ func TestAvatarService_Download_Error(t *testing.T) {
 		storageErr error
 		wantErr    error
 	}{
-		{name: "rejects invalid size", input: DownloadInput{AvatarID: avatarID42, Size: "42x42"}, avatar: avatar, wantErr: ErrInvalidAvatarSize},
-		{name: "returns not found thumbnail", input: DownloadInput{AvatarID: avatarID42, Size: "100x100"}, avatar: avatar, wantErr: model.ErrAvatarNotFound},
-		{name: "returns repository error", input: DownloadInput{AvatarID: avatarID42}, repoErr: model.ErrAvatarNotFound, wantErr: model.ErrAvatarNotFound},
-		{name: "returns storage error", input: DownloadInput{AvatarID: avatarID42}, avatar: avatar, storageErr: errStorage, wantErr: errStorage},
+		{
+			name:    "rejects invalid size",
+			input:   DownloadInput{AvatarID: avatarID42, Size: "42x42"},
+			avatar:  avatar,
+			wantErr: ErrInvalidAvatarSize,
+		},
+		{
+			name:    "returns not found thumbnail",
+			input:   DownloadInput{AvatarID: avatarID42, Size: "100x100"},
+			avatar:  avatar,
+			wantErr: model.ErrAvatarNotFound,
+		},
+		{
+			name:    "returns repository error",
+			input:   DownloadInput{AvatarID: avatarID42},
+			repoErr: model.ErrAvatarNotFound,
+			wantErr: model.ErrAvatarNotFound,
+		},
+		{
+			name:       "returns storage error",
+			input:      DownloadInput{AvatarID: avatarID42},
+			avatar:     avatar,
+			storageErr: errStorage,
+			wantErr:    errStorage,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repository := &downloadRepository{avatar: tt.avatar, err: tt.repoErr}
 			storage := &downloadStorage{err: tt.storageErr}
-			avatarService := NewAvatarService(repository, storage, &fakeAvatarEventPublisher{}, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+			avatarService := NewAvatarService(repository, storage, &fakeAvatarEventPublisher{}, nil, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 
 			_, err := avatarService.Download(context.Background(), tt.input)
 			if err == nil {

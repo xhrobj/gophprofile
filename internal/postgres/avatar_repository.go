@@ -263,6 +263,21 @@ func (r *AvatarRepository) RestoreDeleted(ctx context.Context, avatarID string) 
 	return nil
 }
 
+// StorageUsageBytes возвращает суммарный размер успешно загруженных неудалённых оригиналов.
+func (r *AvatarRepository) StorageUsageBytes(ctx context.Context) (int64, error) {
+	var usage int64
+	if err := r.pool.QueryRow(
+		ctx,
+		`SELECT COALESCE(SUM(size_bytes), 0)::bigint
+		FROM avatars
+		WHERE deleted_at IS NULL AND upload_status = 'completed'`,
+	).Scan(&usage); err != nil {
+		return 0, fmt.Errorf("calculate avatar storage usage: %w", err)
+	}
+
+	return usage, nil
+}
+
 // ClaimForProcessing атомарно захватывает аватарку для обработки сообщения.
 // Redelivery того же messageID может продолжить processing после аварийного завершения Worker.
 func (r *AvatarRepository) ClaimForProcessing(ctx context.Context, avatarID, messageID string, redelivered bool) (bool, error) {

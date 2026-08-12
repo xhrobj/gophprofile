@@ -22,11 +22,15 @@ const (
 	envRabbitMQExchange = "RABBITMQ_EXCHANGE"
 	envRabbitMQQueue    = "RABBITMQ_QUEUE"
 
+	envTracingEnabled = "TRACING_ENABLED"
+	envOTLPEndpoint   = "OTEL_EXPORTER_OTLP_ENDPOINT"
+
 	envLogLevel = "LOG_LEVEL"
 
-	envHTTPAddress     = "HTTP_ADDRESS"
-	envMaxUploadSize   = "MAX_UPLOAD_SIZE"
-	envShutdownTimeout = "SHUTDOWN_TIMEOUT"
+	envHTTPAddress          = "HTTP_ADDRESS"
+	envMaxUploadSize        = "MAX_UPLOAD_SIZE"
+	envWorkerMetricsAddress = "WORKER_METRICS_ADDRESS"
+	envShutdownTimeout      = "SHUTDOWN_TIMEOUT"
 )
 
 // Common содержит параметры конфигурации, общие для Сервера и Воркера.
@@ -43,20 +47,24 @@ type Common struct {
 	RabbitMQExchange string
 	RabbitMQQueue    string
 
+	TracingEnabled  bool
+	OTLPEndpoint    string
+	ShutdownTimeout time.Duration
+
 	LogLevel string
 }
 
 // Server содержит конфигурацию HTTP-сервера.
 type Server struct {
 	Common
-	HTTPAddress     string
-	MaxUploadSize   int64
-	ShutdownTimeout time.Duration
+	HTTPAddress   string
+	MaxUploadSize int64
 }
 
 // Worker содержит конфигурацию фонового воркера.
 type Worker struct {
 	Common
+	MetricsAddress string
 }
 
 // LoadServer загружает и проверяет конфигурацию HTTP-сервера.
@@ -76,16 +84,10 @@ func LoadServer() (Server, error) {
 		return Server{}, err
 	}
 
-	shutdownTimeout, err := positiveDuration(envShutdownTimeout)
-	if err != nil {
-		return Server{}, err
-	}
-
 	return Server{
-		Common:          common,
-		HTTPAddress:     httpAddress,
-		MaxUploadSize:   maxUploadSize,
-		ShutdownTimeout: shutdownTimeout,
+		Common:        common,
+		HTTPAddress:   httpAddress,
+		MaxUploadSize: maxUploadSize,
 	}, nil
 }
 
@@ -96,7 +98,15 @@ func LoadWorker() (Worker, error) {
 		return Worker{}, err
 	}
 
-	return Worker{Common: common}, nil
+	metricsAddress, err := required(envWorkerMetricsAddress)
+	if err != nil {
+		return Worker{}, err
+	}
+
+	return Worker{
+		Common:         common,
+		MetricsAddress: metricsAddress,
+	}, nil
 }
 
 func loadCommon() (Common, error) {
@@ -145,6 +155,21 @@ func loadCommon() (Common, error) {
 		return Common{}, err
 	}
 
+	tracingEnabled, err := optionalBoolean(envTracingEnabled, true)
+	if err != nil {
+		return Common{}, err
+	}
+
+	otlpExporterEndpoint := strings.TrimSpace(os.Getenv(envOTLPEndpoint))
+	if tracingEnabled && otlpExporterEndpoint == "" {
+		return Common{}, fmt.Errorf("environment variable %s is required when tracing is enabled", envOTLPEndpoint)
+	}
+
+	shutdownTimeout, err := positiveDuration(envShutdownTimeout)
+	if err != nil {
+		return Common{}, err
+	}
+
 	logLevel, err := logLevel()
 	if err != nil {
 		return Common{}, err
@@ -163,6 +188,10 @@ func loadCommon() (Common, error) {
 		RabbitMQExchange: rabbitMQExchange,
 		RabbitMQQueue:    rabbitMQQueue,
 
+		TracingEnabled:  tracingEnabled,
+		OTLPEndpoint:    otlpExporterEndpoint,
+		ShutdownTimeout: shutdownTimeout,
+
 		LogLevel: logLevel,
 	}, nil
 }
@@ -180,6 +209,20 @@ func boolean(name string) (bool, error) {
 	value, err := required(name)
 	if err != nil {
 		return false, err
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("environment variable %s must be a boolean: %w", name, err)
+	}
+
+	return parsed, nil
+}
+
+func optionalBoolean(name string, defaultValue bool) (bool, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return defaultValue, nil
 	}
 
 	parsed, err := strconv.ParseBool(value)

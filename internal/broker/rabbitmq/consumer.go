@@ -101,6 +101,21 @@ func (d delivery) Body() []byte {
 	return d.value.Body
 }
 
+func (d delivery) Headers() map[string]string {
+	if len(d.value.Headers) == 0 {
+		return nil
+	}
+
+	headers := make(map[string]string, len(d.value.Headers))
+	for key, value := range d.value.Headers {
+		if text, ok := value.(string); ok {
+			headers[key] = text
+		}
+	}
+
+	return headers
+}
+
 func (d delivery) MessageID() string {
 	return d.value.MessageId
 }

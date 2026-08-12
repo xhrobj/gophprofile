@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/xhrobj/gophprofile/internal/model"
 )
 
@@ -46,7 +44,7 @@ func TestMetadataHandler_GetByID(t *testing.T) {
 		CreatedAt:        createdAt,
 		UpdatedAt:        updatedAt,
 	}}
-	router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
+	router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/avatars/"+testAvatarID+"/metadata", nil)
 	response := httptest.NewRecorder()
 
@@ -92,7 +90,7 @@ func TestMetadataHandler_GetByID(t *testing.T) {
 
 func TestMetadataHandler_GetByID_WithoutThumbnails(t *testing.T) {
 	api := &fakeAvatarMetadataReader{metadataAvatar: model.Avatar{ID: testAvatarID}}
-	router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
+	router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/avatars/"+testAvatarID+"/metadata", nil)
 	response := httptest.NewRecorder()
 
@@ -119,21 +117,21 @@ func TestMetadataHandler_ListByUserID(t *testing.T) {
 			CreatedAt:        createdAt,
 		},
 		{
-			ID:               "c0decafe-babe-4bed-b043-feeddeadbeef",
+			ID:               "c0decafe-babe-4bed-b047-feeddeadbeef",
 			UserID:           "Alice",
 			UploadStatus:     model.UploadStatusCompleted,
 			ProcessingStatus: model.ProcessingStatusPending,
 			CreatedAt:        createdAt.Add(-time.Minute),
 		},
 		{
-			ID:               "c0decafe-babe-4bed-b044-feeddeadbeef",
+			ID:               "c0decafe-babe-4bed-b077-feeddeadbeef",
 			UserID:           "Alice",
 			UploadStatus:     model.UploadStatusFailed,
 			ProcessingStatus: model.ProcessingStatusPending,
 			CreatedAt:        createdAt.Add(-2 * time.Minute),
 		},
 	}}
-	router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
+	router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/Alice/avatars", nil)
 	response := httptest.NewRecorder()
 
@@ -163,7 +161,7 @@ func TestMetadataHandler_ListByUserID(t *testing.T) {
 
 func TestMetadataHandler_ListByUserID_Empty(t *testing.T) {
 	api := &fakeAvatarMetadataReader{}
-	router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
+	router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/Eve/avatars", nil)
 	response := httptest.NewRecorder()
 
@@ -194,7 +192,7 @@ func TestMetadataHandler_InvalidPathParameters(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAvatarMetadataReader{}
-			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 
@@ -220,15 +218,33 @@ func TestMetadataHandler_Error(t *testing.T) {
 		wantStatus  int
 		wantCode    string
 	}{
-		{name: "metadata not found", path: "/api/v1/avatars/" + testAvatarID + "/metadata", metadataErr: model.ErrAvatarNotFound, wantStatus: http.StatusNotFound, wantCode: "avatar_not_found"},
-		{name: "metadata internal error", path: "/api/v1/avatars/" + testAvatarID + "/metadata", metadataErr: errors.New("metadata"), wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
-		{name: "list internal error", path: "/api/v1/users/Alice/avatars", listErr: errors.New("list"), wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+		{
+			name:        "metadata not found",
+			path:        "/api/v1/avatars/" + testAvatarID + "/metadata",
+			metadataErr: model.ErrAvatarNotFound,
+			wantStatus:  http.StatusNotFound,
+			wantCode:    "avatar_not_found",
+		},
+		{
+			name:        "metadata internal error",
+			path:        "/api/v1/avatars/" + testAvatarID + "/metadata",
+			metadataErr: errors.New("metadata"),
+			wantStatus:  http.StatusInternalServerError,
+			wantCode:    "internal_error",
+		},
+		{
+			name:       "list internal error",
+			path:       "/api/v1/users/Alice/avatars",
+			listErr:    errors.New("list"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "internal_error",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAvatarMetadataReader{metadataErr: tt.metadataErr, listErr: tt.listErr}
-			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 

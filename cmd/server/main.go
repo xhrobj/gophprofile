@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 	"github.com/xhrobj/gophprofile/internal/config"
@@ -21,6 +21,7 @@ import (
 	"github.com/xhrobj/gophprofile/internal/health"
 	"github.com/xhrobj/gophprofile/internal/logger"
 	"github.com/xhrobj/gophprofile/internal/migration"
+	"github.com/xhrobj/gophprofile/internal/observability"
 	"github.com/xhrobj/gophprofile/internal/postgres"
 	"github.com/xhrobj/gophprofile/internal/s3"
 	"github.com/xhrobj/gophprofile/internal/server"
@@ -61,8 +62,18 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create server logger: %w", err)
 	}
+
+	tracing, err := observability.NewTracing(ctx, serviceName, cfg.OTLPEndpoint, cfg.TracingEnabled)
+	if err != nil {
+		return fmt.Errorf("create server tracing: %w", err)
+	}
 	defer func() {
-		_ = lg.Sync()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+
+		if shutdownErr := tracing.Shutdown(shutdownCtx); shutdownErr != nil {
+			lg.WarnContext(shutdownCtx, "failed to shutdown tracing", slog.Any("error", shutdownErr))
+		}
 	}()
 
 	pool, err := postgres.Open(ctx, cfg.DatabaseDSN)
@@ -93,12 +104,23 @@ func run(ctx context.Context) error {
 	}
 	defer func() {
 		if closeErr := publisher.Close(); closeErr != nil {
-			lg.Warn("failed to close RabbitMQ publisher", zap.Error(closeErr))
+			lg.WarnContext(ctx, "failed to close RabbitMQ publisher", slog.Any("error", closeErr))
 		}
 	}()
 
+	metrics := observability.NewServerMetrics()
+	metrics.RegisterPostgreSQLPool(pool)
+
 	avatarRepository := postgres.NewAvatarRepository(pool)
-	avatarService := service.NewAvatarService(avatarRepository, storage, publisher, uuid.NewString, s3.OriginalKey)
+	metrics.RegisterAvatarStorageUsage(ctx, avatarRepository)
+	avatarService := service.NewAvatarService(
+		avatarRepository,
+		storage,
+		publisher,
+		metrics,
+		uuid.NewString,
+		s3.OriginalKey,
+	)
 	healthChecker := health.NewChecker(pool, storage, publisher)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddress)
@@ -106,14 +128,14 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("listen on %s: %w", cfg.HTTPAddress, err)
 	}
 
-	errorLog, err := zap.NewStdLogAt(lg.Named("net/http"), zap.ErrorLevel)
-	if err != nil {
-		return fmt.Errorf("create HTTP error logger: %w", err)
-	}
+	errorLog := slog.NewLogLogger(
+		lg.With(slog.String("logger", "net/http")).Handler(),
+		slog.LevelError,
+	)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddress,
-		Handler:           handler.NewRouter(lg, avatarService, healthChecker, cfg.MaxUploadSize),
+		Handler:           handler.NewRouter(lg, avatarService, healthChecker, cfg.MaxUploadSize, metrics),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 		ErrorLog:          errorLog,

@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"github.com/xhrobj/gophprofile/internal/model"
 	"github.com/xhrobj/gophprofile/internal/service"
 )
@@ -47,7 +45,7 @@ func TestDeleteHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAvatarDeleter{}
-			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodDelete, tt.path, nil)
 			request.Header.Set(userIDHeader, "Alice")
 			response := httptest.NewRecorder()
@@ -80,16 +78,31 @@ func TestDeleteHandler_Validation(t *testing.T) {
 		path   string
 		userID string
 	}{
-		{name: "invalid avatar ID", path: "/api/v1/avatars/not-a-uuid", userID: "Alice"},
-		{name: "missing requester", path: "/api/v1/avatars/" + testAvatarID},
-		{name: "invalid path user ID", path: "/api/v1/users/" + strings.Repeat("a", maxUserIDBytes+1) + "/avatar", userID: "Alice"},
-		{name: "blank requester", path: "/api/v1/users/Alice/avatar", userID: "   "},
+		{
+			name:   "invalid avatar ID",
+			path:   "/api/v1/avatars/not-a-uuid",
+			userID: "Alice",
+		},
+		{
+			name: "missing requester",
+			path: "/api/v1/avatars/" + testAvatarID,
+		},
+		{
+			name:   "invalid path user ID",
+			path:   "/api/v1/users/" + strings.Repeat("a", maxUserIDBytes+1) + "/avatar",
+			userID: "Alice",
+		},
+		{
+			name:   "blank requester",
+			path:   "/api/v1/users/Alice/avatar",
+			userID: "   ",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAvatarDeleter{}
-			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodDelete, tt.path, nil)
 			if tt.userID != "" {
 				request.Header.Set(userIDHeader, tt.userID)
@@ -113,16 +126,36 @@ func TestDeleteHandler_Error(t *testing.T) {
 		wantStatus int
 		wantCode   string
 	}{
-		{name: "forbidden", err: service.ErrForbidden, wantStatus: http.StatusForbidden, wantCode: "forbidden"},
-		{name: "avatar not found", err: model.ErrAvatarNotFound, wantStatus: http.StatusNotFound, wantCode: "avatar_not_found"},
-		{name: "service unavailable", err: service.ErrServiceUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "service_unavailable"},
-		{name: "internal error", err: errDeleteAvatar, wantStatus: http.StatusInternalServerError, wantCode: "internal_error"},
+		{
+			name:       "forbidden",
+			err:        service.ErrForbidden,
+			wantStatus: http.StatusForbidden,
+			wantCode:   "forbidden",
+		},
+		{
+			name:       "avatar not found",
+			err:        model.ErrAvatarNotFound,
+			wantStatus: http.StatusNotFound,
+			wantCode:   "avatar_not_found",
+		},
+		{
+			name:       "service unavailable",
+			err:        service.ErrServiceUnavailable,
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "service_unavailable",
+		},
+		{
+			name:       "internal error",
+			err:        errDeleteAvatar,
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "internal_error",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			api := &fakeAvatarDeleter{deleteByIDErr: tt.err}
-			router := NewRouter(zap.NewNop(), api, noopHealthChecker{}, testMaxUploadSize)
+			router := NewRouter(discardLogger(), api, noopHealthChecker{}, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodDelete, "/api/v1/avatars/"+testAvatarID, nil)
 			request.Header.Set(userIDHeader, "Alice")
 			response := httptest.NewRecorder()

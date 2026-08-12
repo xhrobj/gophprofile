@@ -3,12 +3,13 @@ package logger
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestNew(t *testing.T) {
@@ -28,18 +29,8 @@ func TestNew_Validation(t *testing.T) {
 		level   string
 		want    string
 	}{
-		{
-			name:    "empty service",
-			service: "  ",
-			level:   "info",
-			want:    "service",
-		},
-		{
-			name:    "unknown level",
-			service: "server",
-			level:   "trace",
-			want:    "trace",
-		},
+		{name: "empty service", service: "  ", level: "info", want: "service"},
+		{name: "unknown level", service: "server", level: "trace", want: "trace"},
 	}
 
 	for _, tt := range tests {
@@ -59,12 +50,12 @@ func TestParseLevel(t *testing.T) {
 	tests := []struct {
 		name  string
 		value string
-		want  zapcore.Level
+		want  slog.Level
 	}{
-		{name: "debug", value: "DEBUG", want: zapcore.DebugLevel},
-		{name: "info", value: "info", want: zapcore.InfoLevel},
-		{name: "warn", value: " warn ", want: zapcore.WarnLevel},
-		{name: "error", value: "error", want: zapcore.ErrorLevel},
+		{name: "debug", value: "DEBUG", want: slog.LevelDebug},
+		{name: "info", value: "info", want: slog.LevelInfo},
+		{name: "warn", value: " warn ", want: slog.LevelWarn},
+		{name: "error", value: "error", want: slog.LevelError},
 	}
 
 	for _, tt := range tests {
@@ -73,8 +64,8 @@ func TestParseLevel(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseLevel() error = %v", err)
 			}
-			if got.Level() != tt.want {
-				t.Errorf("parseLevel() = %v, want %v", got.Level(), tt.want)
+			if got != tt.want {
+				t.Errorf("parseLevel() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -89,10 +80,23 @@ func TestParseLevel_RejectsUnknownValue(t *testing.T) {
 
 func TestContextFields(t *testing.T) {
 	var output bytes.Buffer
-	lg := testLogger(&output, zapcore.WarnLevel)
+	lg, err := newLogger("server", "warn", &output)
+	if err != nil {
+		t.Fatalf("newLogger() error = %v", err)
+	}
 
-	lg.Info("hidden")
-	WithMessageID(WithRequestID(lg, "request-1"), "message-1").Warn("visible")
+	traceID := trace.TraceID{
+		0xc0, 0xde, 0xca, 0xfe, 0xba, 0xbe, 0x4b, 0xed,
+		0xb0, 0x42, 0xfe, 0xed, 0xde, 0xad, 0xbe, 0xef,
+	}
+	spanID := trace.SpanID{0xde, 0xad, 0xbe, 0xef, 0xc0, 0xde, 0xca, 0xfe}
+	spanContext := trace.NewSpanContext(trace.SpanContextConfig{TraceID: traceID, SpanID: spanID})
+	ctx := trace.ContextWithSpanContext(context.Background(), spanContext)
+
+	lg.InfoContext(ctx, "hidden")
+	requestLogger := WithRequestID(lg, "faceb00cf00dfeeddeadbeefc0decafe")
+	messageLogger := WithMessageID(requestLogger, "deadbeef-f00d-4dad-b042-c0decafe0bad")
+	messageLogger.WarnContext(ctx, "visible")
 
 	scanner := bufio.NewScanner(&output)
 	if !scanner.Scan() {
@@ -107,8 +111,10 @@ func TestContextFields(t *testing.T) {
 	assertLogField(t, entry, "level", "warn")
 	assertLogField(t, entry, "msg", "visible")
 	assertLogField(t, entry, serviceKey, "server")
-	assertLogField(t, entry, requestIDKey, "request-1")
-	assertLogField(t, entry, messageIDKey, "message-1")
+	assertLogField(t, entry, requestIDKey, "faceb00cf00dfeeddeadbeefc0decafe")
+	assertLogField(t, entry, messageIDKey, "deadbeef-f00d-4dad-b042-c0decafe0bad")
+	assertLogField(t, entry, traceIDKey, traceID.String())
+	assertLogField(t, entry, spanIDKey, spanID.String())
 
 	if scanner.Scan() {
 		t.Errorf("unexpected extra log entry: %s", scanner.Text())
@@ -116,16 +122,6 @@ func TestContextFields(t *testing.T) {
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("scan log output: %v", err)
 	}
-}
-
-func testLogger(output *bytes.Buffer, level zapcore.Level) *zap.Logger {
-	core := zapcore.NewCore(
-		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
-		zapcore.AddSync(output),
-		level,
-	)
-
-	return zap.New(core).With(zap.String(serviceKey, "server"))
 }
 
 func assertLogField(t *testing.T, entry map[string]any, key string, want string) {

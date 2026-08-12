@@ -7,6 +7,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Storage хранит объекты в одном S3 bucket.
@@ -25,9 +26,15 @@ func Open(
 	bucket string,
 	useSSL bool,
 ) (*Storage, error) {
+	transport, err := minio.DefaultTransport(useSSL)
+	if err != nil {
+		return nil, fmt.Errorf("create S3 transport: %w", err)
+	}
+
 	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: useSSL,
+		Creds:     credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure:    useSSL,
+		Transport: otelhttp.NewTransport(transport),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create S3 client: %w", err)

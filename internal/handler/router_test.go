@@ -6,13 +6,18 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/xhrobj/gophprofile/internal/model"
 	"github.com/xhrobj/gophprofile/internal/service"
@@ -20,24 +25,45 @@ import (
 
 type noopAvatarService struct{}
 
+type recordedHTTPRequest struct {
+	method   string
+	route    string
+	status   int
+	duration time.Duration
+}
+
+type recordingHTTPMetrics struct {
+	requests []recordedHTTPRequest
+}
+
+func (m *recordingHTTPMetrics) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func (m *recordingHTTPMetrics) ObserveHTTPRequest(method, route string, status int, duration time.Duration) {
+	m.requests = append(m.requests, recordedHTTPRequest{
+		method:   method,
+		route:    route,
+		status:   status,
+		duration: duration,
+	})
+}
+
 func TestRouter_RequestID(t *testing.T) {
 	tests := []struct {
 		name              string
 		incomingRequestID string
 	}{
-		{
-			name: "generates request ID",
-		},
-		{
-			name:              "replaces incoming request ID",
-			incomingRequestID: "external-request-id",
-		},
+		{name: "generates request ID"},
+		{name: "replaces incoming request ID", incomingRequestID: "external-request-id"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var output bytes.Buffer
-			router := NewRouter(testLogger(&output), noopAvatarService{}, noopHealthChecker{}, 10<<20)
+			router := NewRouter(testLogger(&output), noopAvatarService{}, noopHealthChecker{}, 10<<20, nil)
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
 			if tt.incomingRequestID != "" {
 				request.Header.Set(requestIDHeader, tt.incomingRequestID)
@@ -79,6 +105,86 @@ func TestRouter_RequestID(t *testing.T) {
 	}
 }
 
+func TestRouter_Tracing(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
+	spanRecorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20, nil)
+	request := httptest.NewRequest(http.MethodGet, "/web/gallery/Alice", nil)
+	request.Header.Set("traceparent", "00-c0decafebabe4bedb042feeddeadbeef-deadbeefc0decafe-01")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Errorf("response status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	spans := spanRecorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	span := spans[0]
+	if got := span.Name(); got != "GET /web/gallery/{userID}" {
+		t.Errorf("span name = %q, want %q", got, "GET /web/gallery/{userID}")
+	}
+	if got := span.SpanContext().TraceID().String(); got != "c0decafebabe4bedb042feeddeadbeef" {
+		t.Errorf("trace ID = %q, want propagated trace ID", got)
+	}
+	if got := spanAttribute(span, "http.route"); got != "/web/gallery/{userID}" {
+		t.Errorf("http.route = %q, want %q", got, "/web/gallery/{userID}")
+	}
+}
+
+func TestRouter_HTTPMetrics(t *testing.T) {
+	metrics := &recordingHTTPMetrics{}
+	router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20, metrics)
+
+	paths := []string{
+		"/web/gallery/Alice",
+		"/missing/c0decafe-babe-4bed-b042-feeddeadbeef",
+		"/health",
+		"/metrics",
+	}
+	for _, path := range paths {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+
+		router.ServeHTTP(response, request)
+	}
+
+	if len(metrics.requests) != 2 {
+		t.Fatalf("observed requests = %d, want 2", len(metrics.requests))
+	}
+
+	matched := metrics.requests[0]
+	if matched.method != http.MethodGet {
+		t.Errorf("matched method = %q, want %q", matched.method, http.MethodGet)
+	}
+	if matched.route != "/web/gallery/{userID}" {
+		t.Errorf("matched route = %q, want %q", matched.route, "/web/gallery/{userID}")
+	}
+	if matched.status != http.StatusOK {
+		t.Errorf("matched status = %d, want %d", matched.status, http.StatusOK)
+	}
+	unmatched := metrics.requests[1]
+	if unmatched.route != "" {
+		t.Errorf("unmatched route = %q, want empty route pattern", unmatched.route)
+	}
+	if unmatched.status != http.StatusNotFound {
+		t.Errorf("unmatched status = %d, want %d", unmatched.status, http.StatusNotFound)
+	}
+}
+
 func TestRouter_Web(t *testing.T) {
 	tests := []struct {
 		name string
@@ -91,7 +197,7 @@ func TestRouter_Web(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			router := NewRouter(zap.NewNop(), noopAvatarService{}, noopHealthChecker{}, 10<<20)
+			router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20, nil)
 			request := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			response := httptest.NewRecorder()
 
@@ -113,7 +219,7 @@ func TestRouter_Web(t *testing.T) {
 
 func TestRouter_LogsNotFoundStatus(t *testing.T) {
 	var output bytes.Buffer
-	router := NewRouter(testLogger(&output), noopAvatarService{}, noopHealthChecker{}, 10<<20)
+	router := NewRouter(testLogger(&output), noopAvatarService{}, noopHealthChecker{}, 10<<20, nil)
 	request := httptest.NewRequest(http.MethodGet, "/missing", nil)
 	response := httptest.NewRecorder()
 
@@ -151,14 +257,14 @@ func (noopAvatarService) DeleteCurrentByUserID(context.Context, string, string) 
 	return nil
 }
 
-func testLogger(output *bytes.Buffer) *zap.Logger {
-	core := zapcore.NewCore(
-		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
-		zapcore.AddSync(output),
-		zapcore.DebugLevel,
+func testLogger(output *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(output, &slog.HandlerOptions{Level: slog.LevelDebug})).With(
+		slog.String("service", "server"),
 	)
+}
 
-	return zap.New(core).With(zap.String("service", "server"))
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func decodeLogEntry(t *testing.T, output *bytes.Buffer) map[string]any {
@@ -206,4 +312,14 @@ func assertEntryNumber(t *testing.T, entry map[string]any, key string, want int)
 	if got != float64(want) {
 		t.Errorf("log field %q = %#v, want %d", key, got, want)
 	}
+}
+
+func spanAttribute(span sdktrace.ReadOnlySpan, key string) string {
+	for _, attr := range span.Attributes() {
+		if string(attr.Key) == key {
+			return attr.Value.AsString()
+		}
+	}
+
+	return ""
 }

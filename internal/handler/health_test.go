@@ -6,8 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"github.com/xhrobj/gophprofile/internal/health"
 )
 
@@ -53,7 +51,7 @@ func TestHealthHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			checker := &fakeHealthChecker{report: tt.report}
-			router := NewRouter(zap.NewNop(), noopAvatarService{}, checker, testMaxUploadSize)
+			router := NewRouter(discardLogger(), noopAvatarService{}, checker, testMaxUploadSize, nil)
 			request := httptest.NewRequest(http.MethodGet, "/health", nil)
 			response := httptest.NewRecorder()
 

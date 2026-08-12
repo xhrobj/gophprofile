@@ -1,14 +1,18 @@
 # 👤 [(^.^)] GophProfile
 
+[![(-_-) Go CI](https://github.com/xhrobj/gophprofile/actions/workflows/go-ci.yaml/badge.svg)](https://github.com/xhrobj/gophprofile/actions/workflows/go-ci.yaml)
+
 [![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=xhrobj_gophprofile&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=xhrobj_gophprofile)
 
-[![Quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=xhrobj_gophprofile)](https://sonarcloud.io/summary/new_code?id=xhrobj_gophprofile)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=xhrobj_gophprofile&metric=coverage)](https://sonarcloud.io/summary/new_code?id=xhrobj_gophprofile)
 
 GophProfile — сервис для загрузки, хранения, асинхронной обработки и выдачи пользовательских аватаров. Метаданные хранятся в PostgreSQL, оригиналы и миниатюры — в S3-совместимом MinIO, а Server и Worker обмениваются событиями через RabbitMQ.
 
 Требования к сервису описаны в [docs/SPECIFICATION.md](docs/SPECIFICATION.md), HTTP-контракт — в [api/openapi.yml](api/openapi.yml). Исходный README шаблона с планируемой структурой и командами сохранён в [`docs/README.template.md`](docs/README.template.md).
 
-![GophProfile Web UI](docs/images/gophprofile-web-ui.jpg)
+<a href="docs/images/mvp/gophprofile-web-ui.jpg">
+  <img src="docs/images/mvp/gophprofile-web-ui-preview.jpg" alt="GophProfile Web UI">
+</a>
 
 ## Архитектура
 
@@ -59,13 +63,19 @@ make compose-up
 Эквивалентная команда без Make:
 
 ```bash
-docker compose --env-file .env up -d --build --wait
+docker compose --env-file .env --profile observability up -d --build --wait
 ```
 
 После запуска доступны:
 
 - Web UI и REST API: <http://localhost:8080>
 - healthcheck: <http://localhost:8080/health>
+- Server metrics: <http://localhost:8080/metrics>
+- Worker metrics: <http://localhost:9092/metrics>
+- Grafana: <http://localhost:3000>
+- Prometheus: <http://localhost:9090>
+- Alertmanager: <http://localhost:9093>
+- Jaeger: <http://localhost:16686>
 - MinIO Console: <http://localhost:9001>
 - RabbitMQ Management: <http://localhost:15672>
 
@@ -75,7 +85,7 @@ docker compose --env-file .env up -d --build --wait
 make compose-down
 ```
 
-Удалить контейнеры вместе с локальными данными PostgreSQL, MinIO и RabbitMQ:
+Удалить контейнеры вместе со всеми локальными данными полного Compose-стека:
 
 ```bash
 make infra-erase
@@ -120,9 +130,96 @@ make run-worker
 | `RABBITMQ_URL` | RabbitMQ URL для локальных Go-процессов | `amqp://gophprofile:password@localhost:5672/` |
 | `RABBITMQ_EXCHANGE` | direct exchange приложения | `avatars.exchange` |
 | `RABBITMQ_QUEUE` | очередь Worker | `avatars.processing` |
-| `LOG_LEVEL` | уровень Zap-логов: `debug`, `info`, `warn`, `error` | `info` |
+| `TRACING_ENABLED` | включить экспорт distributed traces | `true` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | базовый OTLP/HTTP endpoint для traces | `http://localhost:4318` |
+| `WORKER_METRICS_ADDRESS` | адрес HTTP-сервера метрик Worker | `:9092` |
+| `LOG_LEVEL` | уровень логов: `debug`, `info`, `warn`, `error` | `info` |
 
-При запуске внутри Compose адреса внешних зависимостей переопределяются на внутренние DNS-имена `postgres`, `minio` и `rabbitmq`.
+При запуске внутри Compose адреса зависимостей приложения переопределяются на внутренние DNS-имена `postgres`, `minio` и `rabbitmq`, а OTLP endpoint трассировки — на `jaeger:4318`.
+
+## 👀 Наблюдаемость
+
+GophProfile использует три взаимодополняющих сигнала:
+
+- **metrics** отвечают на вопрос «что происходит с сервисом?» — Prometheus собирает числовые ряды, а Grafana показывает их на дашбордах
+- **logs** помогают понять «что произошло в конкретный момент?» — JSON-логи Server и Worker собираются Alloy и хранятся в Loki
+- **traces** показывают «где именно прошел запрос и на каком участке возникла задержка или ошибка?» — Server и Worker отправляют OpenTelemetry traces по OTLP/HTTP напрямую в Jaeger
+
+Для централизованного хранения логов выбран **Grafana Loki**: Alloy собирает JSON-логи контейнеров и отправляет их в Loki, а Grafana используется для поиска, корреляции и перехода из логов в трассировку.
+
+### Metrics: RED и бизнес-сигналы
+
+Для HTTP используется модель **RED**: Rate, Errors, Duration. Основные метрики:
+
+- `gophprofile_http_requests_total` — количество HTTP-запросов
+- `gophprofile_http_request_duration_seconds` — длительность HTTP-запросов
+- `gophprofile_avatar_uploads_total` и `gophprofile_avatar_upload_duration_seconds` — результаты и длительность загрузок
+- `gophprofile_worker_processed_events_total` и `gophprofile_worker_processing_duration_seconds` — обработка событий Worker
+- `gophprofile_avatar_storage_usage_bytes` — суммарный размер оригиналов
+- `gophprofile_postgres_pool_*` — состояние пула PostgreSQL
+- RabbitMQ экспортирует метрики очередей через собственный Prometheus endpoint
+
+В Grafana автоматически загружаются два дашборда: **GophProfile / Service Overview** — с HTTP RED и метриками процесса; **GophProfile / Business & Worker** — с метриками загрузок, Worker, хранилища, очередей RabbitMQ и пула PostgreSQL.
+
+<a href="docs/images/observability/grafana-service-overview.png">
+  <img src="docs/images/observability/grafana-service-overview-preview.jpg" alt="Grafana Service Overview Dashboard">
+</a>
+
+<a href="docs/images/observability/grafana-business-worker.png">
+  <img src="docs/images/observability/grafana-business-worker-preview.jpg" alt="Grafana Business & Worker Dashboard">
+</a>
+
+### Distributed tracing
+
+Контекст трассировки переносится между Server и Worker в заголовках RabbitMQ-сообщения. Перед публикацией Server добавляет в сообщение W3C Trace Context, а Worker извлекает его перед началом обработки. Поэтому асинхронная обработка продолжается в той же трассе, хотя выполняется другим процессом.
+
+В показанном сценарии один trace включает 6 spans Server и 8 spans Worker — всего 14:
+
+<a href="docs/images/observability/jaeger-upload-search.png">
+  <img src="docs/images/observability/jaeger-upload-search-preview.jpg" alt="Jaeger upload traces">
+</a>
+
+Внутри конкретной операции виден полный путь `POST /api/v1/avatars`: Server, PostgreSQL, MinIO, публикация события в RabbitMQ и продолжение обработки в Worker.
+
+<a href="docs/images/observability/jaeger-upload-trace.png">
+  <img src="docs/images/observability/jaeger-upload-trace-preview.jpg" alt="Jaeger distributed upload trace">
+</a>
+
+### Logs → trace correlation
+
+`trace_id` и `span_id` записываются в JSON-логи как обычные поля, а не как Loki labels. Поэтому каждый новый trace не создаёт отдельный поток логов в Loki. При этом записи Server и Worker можно найти по общему `trace_id` и перейти из лога в Jaeger через derived field **View trace**.
+
+<a href="docs/images/observability/loki-view-trace.png">
+  <img src="docs/images/observability/loki-view-trace-preview.jpg" alt="Loki View trace">
+</a>
+
+Grafana позволяет открыть Loki и Jaeger рядом: слева — связанные логи приложения, справа — соответствующая трасса.
+
+<a href="docs/images/observability/loki-jaeger-correlation.png">
+  <img src="docs/images/observability/loki-jaeger-correlation-preview.jpg" alt="Loki and Jaeger correlation">
+</a>
+
+Типовой путь диагностики:
+
+1. В Grafana заметить рост error rate или p95 latency
+2. В Loki отфильтровать JSON-логи по `service`, уровню или `trace_id`
+3. Из лога перейти в Jaeger по `trace_id` и посмотреть весь путь операции
+
+### ⚡ Alerting
+
+Prometheus отправляет сработавшие алерты в Alertmanager. В репозитории настроены правила `HighErrorRate` и `HighResponseTime`; отправка уведомлений во внешние системы намеренно не настроена.
+
+`HighErrorRate` переходит в `FIRING`, если доля `5xx`-ответов Server за последние пять минут превышает 10% и это состояние сохраняется ещё пять минут:
+
+<a href="docs/images/observability/prometheus-high-error-rate-firing.jpg">
+  <img src="docs/images/observability/prometheus-high-error-rate-firing-preview.jpg" alt="Prometheus HighErrorRate firing">
+</a>
+
+После перехода правила в `FIRING` активный alert появляется в Alertmanager с `alertname="HighErrorRate"` и `severity="warning"`:
+
+<a href="docs/images/observability/alertmanager-high-error-rate.jpg">
+  <img src="docs/images/observability/alertmanager-high-error-rate-preview.jpg" alt="Alertmanager HighErrorRate">
+</a>
 
 ## Основные команды
 
@@ -245,7 +342,7 @@ RabbitMQ использует durable direct exchange и очередь с DLQ. 
 
 Удаление выполняется в два шага: запись сразу скрывается через soft delete в PostgreSQL, а очистка объектов MinIO выполняется Worker после события `avatar.deleted`.
 
-## Известные ограничения MVP
+## Ограничения MVP
 
 - `X-User-ID` является идентификатором владельца для учебного MVP и не заменяет реальную аутентификацию или авторизацию.
 - Между PostgreSQL и RabbitMQ не используется transactional outbox: сбои публикации событий обрабатываются recovery-логикой, поэтому атомарной гарантии между изменением данных и публикацией сообщения нет. Операции с S3 также компенсируются на уровне приложения.
@@ -260,7 +357,7 @@ RabbitMQ использует durable direct exchange и очередь с DLQ. 
 │   ├── server/             # composition root HTTP Server
 │   └── worker/             # composition root Worker
 ├── docs/
-│   └── SPECIFICATION.md    # ТЗ спринта 11
+│   └── SPECIFICATION.md    # входная точка к ТЗ спринтов
 ├── internal/
 │   ├── broker/rabbitmq/    # RabbitMQ adapter и topology
 │   ├── config/             # environment configuration
@@ -268,7 +365,7 @@ RabbitMQ использует durable direct exchange и очередь с DLQ. 
 │   ├── handler/            # HTTP handlers и middleware
 │   ├── health/             # aggregate healthcheck
 │   ├── imageprocessor/     # создание миниатюр
-│   ├── logger/             # Zap logging
+│   ├── logger/             # slog logging
 │   ├── migration/          # автоматическое применение миграций
 │   ├── model/              # доменная модель
 │   ├── postgres/           # PostgreSQL repository
@@ -277,6 +374,7 @@ RabbitMQ использует durable direct exchange и очередь с DLQ. 
 │   ├── service/            # application services
 │   └── worker/             # обработка RabbitMQ-событий
 ├── migrations/             # встроенные SQL-миграции
+├── observability/          # Prometheus, Alertmanager, Grafana, Loki и Alloy
 ├── tests/e2e/              # black-box E2E happy path
 └── web/                    # встроенный frontend
 ```

@@ -6,11 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"reflect"
 	"testing"
 	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/xhrobj/gophprofile/internal/broker"
 	"github.com/xhrobj/gophprofile/internal/event"
@@ -21,13 +20,23 @@ import (
 
 const (
 	testAvatarID  = "c0decafe-babe-4bed-b042-feeddeadbeef"
-	testMessageID = "c0decafe-babe-4bed-b043-feeddeadbeef"
+	testMessageID = "deadbeef-f00d-4dad-b042-c0decafe0bad"
 )
 
 type fakeConsumer struct{}
 
+type processedEventMetric struct {
+	event   string
+	success bool
+}
+
+type fakeMetrics struct {
+	events []processedEventMetric
+}
+
 type fakeDelivery struct {
 	body        []byte
+	headers     map[string]string
 	messageID   string
 	routingKey  string
 	redelivered bool
@@ -78,9 +87,9 @@ type fakeImageProcessor struct {
 }
 
 func TestWorker_Run_StopsOnContextCancellation(t *testing.T) {
-	lg := zap.NewNop()
+	lg := discardLogger()
 	consumer := &fakeConsumer{}
-	avatarWorker := New(consumer, nil, nil, nil, lg)
+	avatarWorker := New(consumer, nil, nil, nil, nil, lg)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 
@@ -170,6 +179,69 @@ func TestWorker_HandleDelivery_AcknowledgesDuplicate(t *testing.T) {
 			processor.calls,
 			repository.completeCalls,
 		)
+	}
+}
+
+func TestWorker_HandleDelivery_RecordsMetrics(t *testing.T) {
+	metrics := &fakeMetrics{}
+	avatarWorker := New(
+		&fakeConsumer{},
+		&fakeRepository{claimResults: []claimResult{{claimed: true}}},
+		&fakeStorage{content: []byte("original")},
+		&fakeImageProcessor{thumbnails: testThumbnails()},
+		metrics,
+		discardLogger(),
+	)
+	avatarWorker.retry = retryPolicy{maxAttempts: maxRetryAttempts, initialBackoff: 0}
+
+	if err := avatarWorker.handleDelivery(context.Background(), newFakeUploadedDelivery(t, testEvent())); err != nil {
+		t.Fatalf("handleDelivery() success error = %v", err)
+	}
+
+	failed := newFakeUploadedDelivery(t, testEvent())
+	failed.body = []byte("not json")
+	if err := avatarWorker.handleDelivery(context.Background(), failed); err != nil {
+		t.Fatalf("handleDelivery() handled error = %v", err)
+	}
+
+	if len(metrics.events) != 2 {
+		t.Fatalf("metric events = %d, want 2", len(metrics.events))
+	}
+	if metrics.events[0].event != event.AvatarUploadedRoutingKey || !metrics.events[0].success {
+		t.Errorf("success metric = %#v, want uploaded/success", metrics.events[0])
+	}
+	if metrics.events[1].event != event.AvatarUploadedRoutingKey || metrics.events[1].success {
+		t.Errorf("error metric = %#v, want uploaded/error", metrics.events[1])
+	}
+}
+
+func TestShouldRecordMetrics(t *testing.T) {
+	processingErr := errors.New("processing failed")
+	tests := []struct {
+		name     string
+		canceled bool
+		err      error
+		want     bool
+	}{
+		{name: "active context without error", want: true},
+		{name: "active context with error", err: processingErr, want: true},
+		{name: "canceled context without error", canceled: true, want: false},
+		{name: "canceled context with error", canceled: true, err: processingErr, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tt.canceled {
+				canceledCtx, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = canceledCtx
+			}
+
+			if got := shouldRecordMetrics(ctx, tt.err); got != tt.want {
+				t.Errorf("shouldRecordMetrics() = %t, want %t", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -577,8 +649,10 @@ func TestWorker_HandleDelivery_RequeuesClaimOnShutdown(t *testing.T) {
 		},
 	}
 	processor := &fakeImageProcessor{}
+	metrics := &fakeMetrics{}
 	item := newFakeUploadedDelivery(t, testEvent())
-	avatarWorker := newTestWorker(repository, storage, processor)
+	avatarWorker := New(&fakeConsumer{}, repository, storage, processor, metrics, discardLogger())
+	avatarWorker.retry = retryPolicy{maxAttempts: maxRetryAttempts, initialBackoff: 0}
 
 	if err := avatarWorker.handleDelivery(ctx, item); err != nil {
 		t.Fatalf("handleDelivery() error = %v", err)
@@ -589,6 +663,9 @@ func TestWorker_HandleDelivery_RequeuesClaimOnShutdown(t *testing.T) {
 	}
 	if !reflect.DeepEqual(repository.statusUpdates, []model.ProcessingStatus{model.ProcessingStatusPending}) {
 		t.Errorf("processing status updates = %v, want [pending]", repository.statusUpdates)
+	}
+	if len(metrics.events) != 0 {
+		t.Errorf("metric events = %v, want none for requeued delivery", metrics.events)
 	}
 }
 
@@ -642,6 +719,10 @@ func (*fakeConsumer) Consume(ctx context.Context) (<-chan broker.Delivery, error
 
 func (f *fakeDelivery) Body() []byte {
 	return f.body
+}
+
+func (f *fakeDelivery) Headers() map[string]string {
+	return f.headers
 }
 
 func (f *fakeDelivery) MessageID() string {
@@ -754,8 +835,16 @@ func (f *fakeImageProcessor) Process(io.Reader) ([]imageprocessor.Thumbnail, err
 	return f.thumbnails, f.err
 }
 
+func (f *fakeMetrics) ObserveProcessedEvent(eventName string, success bool, _ time.Duration) {
+	f.events = append(f.events, processedEventMetric{event: eventName, success: success})
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
 func newTestWorker(repository Repository, storage Storage, processor ImageProcessor) *Worker {
-	avatarWorker := New(&fakeConsumer{}, repository, storage, processor, zap.NewNop())
+	avatarWorker := New(&fakeConsumer{}, repository, storage, processor, nil, discardLogger())
 	avatarWorker.retry = retryPolicy{
 		maxAttempts:    maxRetryAttempts,
 		initialBackoff: 0,

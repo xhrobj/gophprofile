@@ -29,11 +29,14 @@ func TestLoadServer(t *testing.T) {
 			RabbitMQExchange: "avatars.exchange",
 			RabbitMQQueue:    "avatars.processing",
 
+			TracingEnabled:  true,
+			OTLPEndpoint:    "http://localhost:4318",
+			ShutdownTimeout: 10 * time.Second,
+
 			LogLevel: "warn",
 		},
-		HTTPAddress:     ":8080",
-		MaxUploadSize:   10 * 1024 * 1024,
-		ShutdownTimeout: 10 * time.Second,
+		HTTPAddress:   ":8080",
+		MaxUploadSize: 10 * 1024 * 1024,
 	}
 
 	if got != want {
@@ -45,7 +48,6 @@ func TestLoadWorker(t *testing.T) {
 	setValidEnvironment(t)
 	t.Setenv(envHTTPAddress, "")
 	t.Setenv(envMaxUploadSize, "")
-	t.Setenv(envShutdownTimeout, "")
 
 	got, err := LoadWorker()
 	if err != nil {
@@ -66,8 +68,13 @@ func TestLoadWorker(t *testing.T) {
 			RabbitMQExchange: "avatars.exchange",
 			RabbitMQQueue:    "avatars.processing",
 
+			TracingEnabled:  true,
+			OTLPEndpoint:    "http://localhost:4318",
+			ShutdownTimeout: 10 * time.Second,
+
 			LogLevel: "info",
 		},
+		MetricsAddress: ":9092",
 	}
 
 	if got != want {
@@ -81,41 +88,13 @@ func TestLoadServer_Validation(t *testing.T) {
 		envName string
 		value   string
 	}{
-		{
-			name:    "missing HTTP address",
-			envName: envHTTPAddress,
-			value:   "",
-		},
-		{
-			name:    "missing max upload size",
-			envName: envMaxUploadSize,
-			value:   "",
-		},
-		{
-			name:    "non-integer max upload size",
-			envName: envMaxUploadSize,
-			value:   "ten megabytes",
-		},
-		{
-			name:    "zero max upload size",
-			envName: envMaxUploadSize,
-			value:   "0",
-		},
-		{
-			name:    "negative max upload size",
-			envName: envMaxUploadSize,
-			value:   "-1",
-		},
-		{
-			name:    "invalid shutdown timeout",
-			envName: envShutdownTimeout,
-			value:   "soon",
-		},
-		{
-			name:    "zero shutdown timeout",
-			envName: envShutdownTimeout,
-			value:   "0s",
-		},
+		{name: "missing HTTP address", envName: envHTTPAddress, value: ""},
+		{name: "missing max upload size", envName: envMaxUploadSize, value: ""},
+		{name: "non-integer max upload size", envName: envMaxUploadSize, value: "ten megabytes"},
+		{name: "zero max upload size", envName: envMaxUploadSize, value: "0"},
+		{name: "negative max upload size", envName: envMaxUploadSize, value: "-1"},
+		{name: "invalid shutdown timeout", envName: envShutdownTimeout, value: "soon"},
+		{name: "zero shutdown timeout", envName: envShutdownTimeout, value: "0s"},
 	}
 
 	for _, tt := range tests {
@@ -141,56 +120,21 @@ func TestLoadWorker_Validation(t *testing.T) {
 		envName string
 		value   string
 	}{
-		{
-			name:    "missing database DSN",
-			envName: envDatabaseDSN,
-			value:   "",
-		},
-		{
-			name:    "missing S3 endpoint",
-			envName: envS3Endpoint,
-			value:   "",
-		},
-		{
-			name:    "missing S3 access key",
-			envName: envS3AccessKey,
-			value:   "",
-		},
-		{
-			name:    "missing S3 secret key",
-			envName: envS3SecretKey,
-			value:   "",
-		},
-		{
-			name:    "missing S3 bucket",
-			envName: envS3Bucket,
-			value:   "",
-		},
-		{
-			name:    "invalid S3 SSL flag",
-			envName: envS3UseSSL,
-			value:   "sometimes",
-		},
-		{
-			name:    "missing RabbitMQ URL",
-			envName: envRabbitMQURL,
-			value:   "",
-		},
-		{
-			name:    "missing RabbitMQ exchange",
-			envName: envRabbitMQExchange,
-			value:   "",
-		},
-		{
-			name:    "missing RabbitMQ queue",
-			envName: envRabbitMQQueue,
-			value:   "",
-		},
-		{
-			name:    "unknown log level",
-			envName: envLogLevel,
-			value:   "trace",
-		},
+		{name: "missing database DSN", envName: envDatabaseDSN, value: ""},
+		{name: "missing S3 endpoint", envName: envS3Endpoint, value: ""},
+		{name: "missing S3 access key", envName: envS3AccessKey, value: ""},
+		{name: "missing S3 secret key", envName: envS3SecretKey, value: ""},
+		{name: "missing S3 bucket", envName: envS3Bucket, value: ""},
+		{name: "invalid S3 SSL flag", envName: envS3UseSSL, value: "sometimes"},
+		{name: "missing RabbitMQ URL", envName: envRabbitMQURL, value: ""},
+		{name: "missing RabbitMQ exchange", envName: envRabbitMQExchange, value: ""},
+		{name: "missing RabbitMQ queue", envName: envRabbitMQQueue, value: ""},
+		{name: "invalid tracing flag", envName: envTracingEnabled, value: "sometimes"},
+		{name: "missing Worker metrics address", envName: envWorkerMetricsAddress, value: ""},
+		{name: "missing shutdown timeout", envName: envShutdownTimeout, value: ""},
+		{name: "invalid shutdown timeout", envName: envShutdownTimeout, value: "soon"},
+		{name: "zero shutdown timeout", envName: envShutdownTimeout, value: "0s"},
+		{name: "unknown log level", envName: envLogLevel, value: "trace"},
 	}
 
 	for _, tt := range tests {
@@ -209,10 +153,52 @@ func TestLoadWorker_Validation(t *testing.T) {
 	}
 }
 
+func TestLoadWorker_TracingRequiresOTLPEndpoint(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv(envOTLPEndpoint, "")
+
+	_, err := LoadWorker()
+	if err == nil {
+		t.Fatal("LoadWorker() error = nil, want validation error")
+	}
+	if !strings.Contains(err.Error(), envOTLPEndpoint) {
+		t.Errorf("LoadWorker() error = %q, want variable name %q", err, envOTLPEndpoint)
+	}
+}
+
+func TestLoadWorker_TracingEnabledByDefault(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv(envTracingEnabled, "")
+
+	got, err := LoadWorker()
+	if err != nil {
+		t.Fatalf("LoadWorker() error = %v", err)
+	}
+	if !got.TracingEnabled {
+		t.Error("LoadWorker() tracing enabled = false, want true")
+	}
+}
+
+func TestLoadWorker_TracingDisabledWithoutOTLPEndpoint(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv(envTracingEnabled, "false")
+	t.Setenv(envOTLPEndpoint, "")
+
+	got, err := LoadWorker()
+	if err != nil {
+		t.Fatalf("LoadWorker() error = %v", err)
+	}
+	if got.TracingEnabled {
+		t.Error("LoadWorker() tracing enabled = true, want false")
+	}
+	if got.OTLPEndpoint != "" {
+		t.Errorf("LoadWorker() OTLP endpoint = %q, want empty", got.OTLPEndpoint)
+	}
+}
+
 func setValidEnvironment(t *testing.T) {
 	t.Helper()
 
-	t.Setenv(envHTTPAddress, ":8080")
 	t.Setenv(envDatabaseDSN, "postgres://gophprofile:gophprofile@localhost:5432/gophprofile?sslmode=disable")
 
 	t.Setenv(envS3Endpoint, "localhost:9000")
@@ -225,7 +211,13 @@ func setValidEnvironment(t *testing.T) {
 	t.Setenv(envRabbitMQExchange, "avatars.exchange")
 	t.Setenv(envRabbitMQQueue, "avatars.processing")
 
+	t.Setenv(envTracingEnabled, "true")
+	t.Setenv(envOTLPEndpoint, "http://localhost:4318")
+
+	t.Setenv(envHTTPAddress, ":8080")
 	t.Setenv(envMaxUploadSize, "10485760")
-	t.Setenv(envLogLevel, "info")
+	t.Setenv(envWorkerMetricsAddress, ":9092")
 	t.Setenv(envShutdownTimeout, "10s")
+
+	t.Setenv(envLogLevel, "info")
 }

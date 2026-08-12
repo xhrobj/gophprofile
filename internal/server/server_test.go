@@ -3,12 +3,12 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"testing"
 	"time"
-
-	"go.uber.org/zap"
 )
 
 func TestRun_StopsAfterContextCancellation(t *testing.T) {
@@ -17,7 +17,7 @@ func TestRun_StopsAfterContextCancellation(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 
-	lg := zap.NewNop()
+	lg := discardLogger()
 	httpServer := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
@@ -74,7 +74,7 @@ func TestRun_ForcesCloseAfterShutdownTimeout(t *testing.T) {
 
 	const shutdownTimeout = 50 * time.Millisecond
 	go func() {
-		done <- Run(ctx, listener, httpServer, shutdownTimeout, zap.NewNop())
+		done <- Run(ctx, listener, httpServer, shutdownTimeout, discardLogger())
 	}()
 
 	waitForServer(t, listener.Addr().String())
@@ -135,11 +135,15 @@ func TestRun_ReturnsServeError(t *testing.T) {
 		listener,
 		&http.Server{ReadHeaderTimeout: time.Second},
 		time.Second,
-		zap.NewNop(),
+		discardLogger(),
 	)
 	if !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("Run() error = %v, want %v", err, net.ErrClosed)
 	}
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func waitForServer(t *testing.T, address string) {

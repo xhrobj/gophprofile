@@ -256,7 +256,7 @@ func (p *deletePublisher) PublishAvatarDeleted(_ context.Context, avatar model.A
 }
 
 func newDeleteTestAvatarService(repository AvatarRepository, publisher AvatarEventPublisher) *AvatarService {
-	return NewAvatarService(repository, &fakeAvatarStorage{}, publisher, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
+	return NewAvatarService(repository, &fakeAvatarStorage{}, publisher, nil, func() string { return avatarID42 }, func(_, _, _ string) string { return "" })
 }
 
 func assertDeleteErrors(t *testing.T, err error, wantErrors []error) {

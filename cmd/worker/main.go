@@ -5,22 +5,29 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-
-	"go.uber.org/zap"
+	"time"
 
 	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 	"github.com/xhrobj/gophprofile/internal/config"
 	"github.com/xhrobj/gophprofile/internal/imageprocessor"
 	"github.com/xhrobj/gophprofile/internal/logger"
+	"github.com/xhrobj/gophprofile/internal/observability"
 	"github.com/xhrobj/gophprofile/internal/postgres"
 	"github.com/xhrobj/gophprofile/internal/s3"
+	httpserver "github.com/xhrobj/gophprofile/internal/server"
 	"github.com/xhrobj/gophprofile/internal/worker"
 )
 
-const serviceName = "worker"
+const (
+	serviceName              = "worker"
+	metricsReadHeaderTimeout = 5 * time.Second
+)
 
 func main() {
 	if err := printBanner(os.Stdout); err != nil {
@@ -45,8 +52,18 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create worker logger: %w", err)
 	}
+
+	tracing, err := observability.NewTracing(ctx, serviceName, cfg.OTLPEndpoint, cfg.TracingEnabled)
+	if err != nil {
+		return fmt.Errorf("create worker tracing: %w", err)
+	}
 	defer func() {
-		_ = lg.Sync()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+
+		if shutdownErr := tracing.Shutdown(shutdownCtx); shutdownErr != nil {
+			lg.WarnContext(shutdownCtx, "failed to shutdown tracing", slog.Any("error", shutdownErr))
+		}
 	}()
 
 	pool, err := postgres.Open(ctx, cfg.DatabaseDSN)
@@ -73,19 +90,65 @@ func run(ctx context.Context) error {
 	}
 	defer func() {
 		if closeErr := consumer.Close(); closeErr != nil {
-			lg.Warn("failed to close RabbitMQ consumer", zap.Error(closeErr))
+			lg.WarnContext(ctx, "failed to close RabbitMQ consumer", slog.Any("error", closeErr))
 		}
 	}()
+
+	metrics := observability.NewWorkerMetrics()
+	metrics.RegisterPostgreSQLPool(pool)
+	metricsListener, err := net.Listen("tcp", cfg.MetricsAddress)
+	if err != nil {
+		return fmt.Errorf("listen for Worker metrics on %s: %w", cfg.MetricsAddress, err)
+	}
+
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", metrics.Handler())
+	metricsServer := &http.Server{
+		Addr:              cfg.MetricsAddress,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: metricsReadHeaderTimeout,
+		ErrorLog: slog.NewLogLogger(
+			lg.With(slog.String("logger", "metrics/net/http")).Handler(),
+			slog.LevelError,
+		),
+	}
 
 	avatarWorker := worker.New(
 		consumer,
 		postgres.NewAvatarRepository(pool),
 		storage,
 		imageprocessor.New(),
+		metrics,
 		lg,
 	)
 
-	return avatarWorker.Run(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	metricsErrors := make(chan error, 1)
+	go func() {
+		metricsErrors <- httpserver.Run(
+			runCtx,
+			metricsListener,
+			metricsServer,
+			cfg.ShutdownTimeout,
+			lg.With(slog.String("component", "metrics")),
+		)
+		cancel()
+	}()
+
+	workerErr := avatarWorker.Run(runCtx)
+	cancel()
+	metricsErr := <-metricsErrors
+
+	if workerErr != nil {
+		return workerErr
+	}
+	if metricsErr != nil {
+		return fmt.Errorf("run Worker metrics server: %w", metricsErr)
+	}
+
+	return nil
 }
 
 func printBanner(output io.Writer) error {
