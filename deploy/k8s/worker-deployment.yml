@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gophprofile
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gophprofile
+        app.kubernetes.io/component: worker
+    spec:
+      containers:
+        - name: worker
+          image: gophprofile-worker:d4da5dd
+          imagePullPolicy: Never
+          ports:
+            - name: metrics
+              containerPort: 9092
+          envFrom:
+            - configMapRef:
+                name: gophprofile-config
+            - secretRef:
+                name: gophprofile-secrets
+      restartPolicy: Always
