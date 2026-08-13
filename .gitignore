@@ -19,3 +19,6 @@ __MACOSX/
 .env
 .env.*
 !.env.example
+
+# Local k8s secrets
+/deploy/k8s/secret.yml
