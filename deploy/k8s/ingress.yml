@@ -1,0 +1,47 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: upload-limit
+  namespace: gophprofile
+spec:
+  buffering:
+    maxRequestBodyBytes: 11534336
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: server
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/component: server
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: gophprofile-upload-limit@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: gophprofile.local
+      http:
+        paths:
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: server
+                port:
+                  name: http
+          - path: /web
+            pathType: Prefix
+            backend:
+              service:
+                name: server
+                port:
+                  name: http
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: server
+                port:
+                  name: http
