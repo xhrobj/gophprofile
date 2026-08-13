@@ -1,6 +1,6 @@
 .PHONY: \
 	show-coverage \
-	build build-server build-worker \
+	build build-server build-worker build-k8s-images \
 	db-up db-connect \
 	s3-up \
 	rabbitmq-up \
@@ -35,6 +35,12 @@ BIN_DIR := bin
 SERVER := $(BIN_DIR)/server
 WORKER := $(BIN_DIR)/worker
 
+# локальные Kubernetes images и Docker context Rancher Desktop
+K8S_DOCKER_CONTEXT ?= rancher-desktop
+K8S_IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
+K8S_SERVER_IMAGE ?= gophprofile-server:$(K8S_IMAGE_TAG)
+K8S_WORKER_IMAGE ?= gophprofile-worker:$(K8S_IMAGE_TAG)
+
 # обновить профиль покрытия и вывести общий процент
 show-coverage: coverage
 	go tool cover -func=coverage.out | tail -n 1
@@ -51,6 +57,17 @@ build-server:
 build-worker:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(WORKER) ./cmd/worker
+
+# собрать Server и Worker images для локального Kubernetes Rancher Desktop
+build-k8s-images:
+	@context="$$(docker context show)"; \
+	if [ "$$context" != "$(K8S_DOCKER_CONTEXT)" ]; then \
+		echo "(o_0) Expected Docker context $(K8S_DOCKER_CONTEXT), got $$context" >&2; \
+		exit 1; \
+	fi
+	docker build --target server -t $(K8S_SERVER_IMAGE) .
+	docker build --target worker -t $(K8S_WORKER_IMAGE) .
+	@printf '(*_*) Built Kubernetes images:\n  %s\n  %s\n' "$(K8S_SERVER_IMAGE)" "$(K8S_WORKER_IMAGE)"
 
 # создать (при необходимости) и запустить локальный PostgreSQL и дождаться его готовности
 db-up:
