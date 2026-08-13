@@ -24,3 +24,4 @@ __MACOSX/
 /deploy/k8s/secret.yml
 /deploy/k8s/postgres-secret.yml
 /deploy/k8s/minio-secret.yml
+/deploy/k8s/rabbitmq-secret.yml
