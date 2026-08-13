@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: gophprofile
+data:
+  POSTGRES_DB: gophprofile
+  POSTGRES_USER: gophprofile
