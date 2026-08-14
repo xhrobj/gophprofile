@@ -30,4 +30,11 @@ spec:
                 name: gophprofile-config
             - secretRef:
                 name: gophprofile-secrets
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 500m
       restartPolicy: Always
