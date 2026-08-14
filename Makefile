@@ -1,6 +1,7 @@
 .PHONY: \
 	show-coverage \
 	build build-server build-worker build-migrate build-k8s-images \
+	k8s-monitoring-up k8s-monitoring-down \
 	db-up db-connect \
 	s3-up \
 	rabbitmq-up \
@@ -43,6 +44,12 @@ K8S_SERVER_IMAGE ?= gophprofile-server:$(K8S_IMAGE_TAG)
 K8S_WORKER_IMAGE ?= gophprofile-worker:$(K8S_IMAGE_TAG)
 K8S_MIGRATE_IMAGE ?= gophprofile-migrate:$(K8S_IMAGE_TAG)
 
+# Kubernetes monitoring stack
+K8S_MONITORING_NAMESPACE ?= monitoring
+K8S_MONITORING_RELEASE ?= monitoring
+K8S_MONITORING_CHART_VERSION ?= 88.3.0
+K8S_MONITORING_VALUES ?= deploy/k8s/monitoring/values.yml
+
 # обновить профиль покрытия и вывести общий процент
 show-coverage: coverage
 	go tool cover -func=coverage.out | tail -n 1
@@ -77,6 +84,21 @@ build-k8s-images:
 	docker build --target migrate -t $(K8S_MIGRATE_IMAGE) .
 	@printf '(*_*) Built Kubernetes images:\n  %s\n  %s\n  %s\n' \
 		"$(K8S_SERVER_IMAGE)" "$(K8S_WORKER_IMAGE)" "$(K8S_MIGRATE_IMAGE)"
+
+# установить или обновить Kubernetes monitoring stack через Helm
+k8s-monitoring-up:
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+	helm upgrade --install $(K8S_MONITORING_RELEASE) prometheus-community/kube-prometheus-stack \
+		--version $(K8S_MONITORING_CHART_VERSION) \
+		--namespace $(K8S_MONITORING_NAMESPACE) \
+		--create-namespace \
+		--values $(K8S_MONITORING_VALUES) \
+		--wait \
+		--timeout 10m
+
+# удалить Kubernetes monitoring stack
+k8s-monitoring-down:
+	helm uninstall $(K8S_MONITORING_RELEASE) --namespace $(K8S_MONITORING_NAMESPACE)
 
 # создать (при необходимости) и запустить локальный PostgreSQL и дождаться его готовности
 db-up:
