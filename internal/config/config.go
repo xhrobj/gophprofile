@@ -67,6 +67,11 @@ type Worker struct {
 	MetricsAddress string
 }
 
+// Migration содержит конфигурацию запуска миграций PostgreSQL.
+type Migration struct {
+	DatabaseDSN string
+}
+
 // LoadServer загружает и проверяет конфигурацию HTTP-сервера.
 func LoadServer() (Server, error) {
 	common, err := loadCommon()
@@ -107,6 +112,16 @@ func LoadWorker() (Worker, error) {
 		Common:         common,
 		MetricsAddress: metricsAddress,
 	}, nil
+}
+
+// LoadMigration загружает конфигурацию запуска миграций PostgreSQL.
+func LoadMigration() (Migration, error) {
+	databaseDSN, err := required(envDatabaseDSN)
+	if err != nil {
+		return Migration{}, err
+	}
+
+	return Migration{DatabaseDSN: databaseDSN}, nil
 }
 
 func loadCommon() (Common, error) {

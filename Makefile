@@ -1,6 +1,6 @@
 .PHONY: \
 	show-coverage \
-	build build-server build-worker build-k8s-images \
+	build build-server build-worker build-migrate build-k8s-images \
 	db-up db-connect \
 	s3-up \
 	rabbitmq-up \
@@ -34,19 +34,21 @@ BIN_DIR := bin
 
 SERVER := $(BIN_DIR)/server
 WORKER := $(BIN_DIR)/worker
+MIGRATE := $(BIN_DIR)/migrate
 
 # локальные Kubernetes images и Docker context Rancher Desktop
 K8S_DOCKER_CONTEXT ?= rancher-desktop
 K8S_IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
 K8S_SERVER_IMAGE ?= gophprofile-server:$(K8S_IMAGE_TAG)
 K8S_WORKER_IMAGE ?= gophprofile-worker:$(K8S_IMAGE_TAG)
+K8S_MIGRATE_IMAGE ?= gophprofile-migrate:$(K8S_IMAGE_TAG)
 
 # обновить профиль покрытия и вывести общий процент
 show-coverage: coverage
 	go tool cover -func=coverage.out | tail -n 1
 
-# собрать Сервер и Воркер
-build: build-server build-worker
+# собрать Сервер, Воркер и Мигратор
+build: build-server build-worker build-migrate
 
 # собрать HTTP-сервер
 build-server:
@@ -58,7 +60,12 @@ build-worker:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(WORKER) ./cmd/worker
 
-# собрать Server и Worker images для локального Kubernetes Rancher Desktop
+# собрать Мигратор PostgreSQL
+build-migrate:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(MIGRATE) ./cmd/migrate
+
+# собрать Server, Worker и Migrate images для локального Kubernetes Rancher Desktop
 build-k8s-images:
 	@context="$$(docker context show)"; \
 	if [ "$$context" != "$(K8S_DOCKER_CONTEXT)" ]; then \
@@ -67,7 +74,9 @@ build-k8s-images:
 	fi
 	docker build --target server -t $(K8S_SERVER_IMAGE) .
 	docker build --target worker -t $(K8S_WORKER_IMAGE) .
-	@printf '(*_*) Built Kubernetes images:\n  %s\n  %s\n' "$(K8S_SERVER_IMAGE)" "$(K8S_WORKER_IMAGE)"
+	docker build --target migrate -t $(K8S_MIGRATE_IMAGE) .
+	@printf '(*_*) Built Kubernetes images:\n  %s\n  %s\n  %s\n' \
+		"$(K8S_SERVER_IMAGE)" "$(K8S_WORKER_IMAGE)" "$(K8S_MIGRATE_IMAGE)"
 
 # создать (при необходимости) и запустить локальный PostgreSQL и дождаться его готовности
 db-up:
@@ -97,13 +106,15 @@ infra-erase:
 	docker compose --profile observability down -v
 
 # собрать и запустить Сервер
-run-server: infra-up build-server
+run-server: infra-up build-server build-migrate
 	docker compose --profile observability up -d --wait jaeger
+	$(MIGRATE)
 	$(SERVER)
 
 # собрать и запустить Воркер
-run-worker: infra-up build-worker
+run-worker: infra-up build-worker build-migrate
 	docker compose --profile observability up -d --wait jaeger
+	$(MIGRATE)
 	$(WORKER)
 
 # собрать и запустить полный локальный стек приложения:

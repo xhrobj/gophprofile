@@ -44,6 +44,34 @@ func TestLoadServer(t *testing.T) {
 	}
 }
 
+func TestLoadMigration(t *testing.T) {
+	t.Setenv(envDatabaseDSN, "postgres://gophprofile:gophprofile@localhost:5432/gophprofile?sslmode=disable")
+
+	got, err := LoadMigration()
+	if err != nil {
+		t.Fatalf("LoadMigration() error = %v", err)
+	}
+
+	want := Migration{
+		DatabaseDSN: "postgres://gophprofile:gophprofile@localhost:5432/gophprofile?sslmode=disable",
+	}
+	if got != want {
+		t.Errorf("LoadMigration() = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadMigration_Validation(t *testing.T) {
+	t.Setenv(envDatabaseDSN, "")
+
+	_, err := LoadMigration()
+	if err == nil {
+		t.Fatal("LoadMigration() error = nil, want validation error")
+	}
+	if !strings.Contains(err.Error(), envDatabaseDSN) {
+		t.Errorf("LoadMigration() error = %q, want variable name %q", err, envDatabaseDSN)
+	}
+}
+
 func TestLoadWorker(t *testing.T) {
 	setValidEnvironment(t)
 	t.Setenv(envHTTPAddress, "")

@@ -20,7 +20,6 @@ import (
 	"github.com/xhrobj/gophprofile/internal/handler"
 	"github.com/xhrobj/gophprofile/internal/health"
 	"github.com/xhrobj/gophprofile/internal/logger"
-	"github.com/xhrobj/gophprofile/internal/migration"
 	"github.com/xhrobj/gophprofile/internal/observability"
 	"github.com/xhrobj/gophprofile/internal/postgres"
 	"github.com/xhrobj/gophprofile/internal/s3"
@@ -81,10 +80,6 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("open PostgreSQL: %w", err)
 	}
 	defer pool.Close()
-
-	if err := migration.Run(pool); err != nil {
-		return fmt.Errorf("run PostgreSQL migrations: %w", err)
-	}
 
 	storage, err := s3.Open(
 		ctx,
