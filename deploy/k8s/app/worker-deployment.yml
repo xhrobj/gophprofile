@@ -18,11 +18,25 @@ spec:
         app.kubernetes.io/name: gophprofile
         app.kubernetes.io/component: worker
     spec:
+      serviceAccountName: gophprofile-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       terminationGracePeriodSeconds: 30
       containers:
         - name: worker
           image: gophprofile-worker:local
           imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: metrics
               containerPort: 9092

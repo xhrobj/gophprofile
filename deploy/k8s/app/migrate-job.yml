@@ -14,11 +14,25 @@ spec:
         app.kubernetes.io/name: gophprofile
         app.kubernetes.io/component: migrate
     spec:
+      serviceAccountName: gophprofile-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       restartPolicy: Never
       containers:
         - name: migrate
           image: gophprofile-migrate:local
           imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: 50m
