@@ -100,7 +100,7 @@ func (s telemetryNoiseSampler) ShouldSample(params sdktrace.SamplingParameters) 
 	for _, attr := range params.Attributes {
 		if attr.Key == semconv.URLPathKey {
 			path := attr.Value.AsString()
-			if path == "/health" || path == "/metrics" {
+			if path == "/live" || path == "/health" || path == "/metrics" {
 				return sdktrace.NeverSample().ShouldSample(params)
 			}
 		}

@@ -152,6 +152,7 @@ func TestRouter_HTTPMetrics(t *testing.T) {
 	paths := []string{
 		"/web/gallery/Alice",
 		"/missing/c0decafe-babe-4bed-b042-feeddeadbeef",
+		"/live",
 		"/health",
 		"/metrics",
 	}

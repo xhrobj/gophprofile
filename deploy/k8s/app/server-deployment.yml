@@ -18,6 +18,7 @@ spec:
         app.kubernetes.io/name: gophprofile
         app.kubernetes.io/component: server
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: server
           image: gophprofile-server:local
@@ -37,4 +38,20 @@ spec:
             limits:
               memory: 512Mi
               cpu: 500m
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 4
+            failureThreshold: 3
       restartPolicy: Always

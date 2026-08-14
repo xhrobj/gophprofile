@@ -109,7 +109,7 @@ func httpMetricsMiddleware(metrics HTTPMetrics) func(http.Handler) http.Handler 
 			next.ServeHTTP(writer, r)
 
 			routePattern := chi.RouteContext(r.Context()).RoutePattern()
-			if routePattern == "/health" || routePattern == "/metrics" {
+			if routePattern == "/live" || routePattern == "/health" || routePattern == "/metrics" {
 				return
 			}
 

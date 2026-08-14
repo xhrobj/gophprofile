@@ -18,6 +18,7 @@ spec:
         app.kubernetes.io/name: gophprofile
         app.kubernetes.io/component: worker
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: worker
           image: gophprofile-worker:local
@@ -37,4 +38,20 @@ spec:
             limits:
               memory: 512Mi
               cpu: 500m
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
       restartPolicy: Always

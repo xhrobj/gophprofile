@@ -102,6 +102,9 @@ func run(ctx context.Context) error {
 	}
 
 	metricsMux := http.NewServeMux()
+	metricsMux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 	metricsMux.Handle("/metrics", metrics.Handler())
 	metricsServer := &http.Server{
 		Addr:              cfg.MetricsAddress,

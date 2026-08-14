@@ -53,6 +53,7 @@ func NewRouter(
 	router.Get("/web/upload", webHandler.ServeHTTP)
 	router.Get("/web/gallery/{userID}", webHandler.ServeHTTP)
 
+	router.Get("/live", newLivenessHandler())
 	router.Get("/health", newHealthHandler(healthChecker))
 	if metrics != nil {
 		router.Handle("/metrics", metrics.Handler())
