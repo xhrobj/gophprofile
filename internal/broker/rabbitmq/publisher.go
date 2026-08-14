@@ -28,44 +28,28 @@ type amqpTableCarrier amqp.Table
 
 // Publisher публикует события аватаров в RabbitMQ с publisher confirms.
 type Publisher struct {
+	url        string
 	connection *amqp.Connection
 	channel    *amqp.Channel
 	exchange   string
+	queue      string
 	mu         sync.Mutex
+	closed     bool
 }
 
 // OpenPublisher подключается к RabbitMQ, идемпотентно объявляет topology и включает publisher confirms.
 func OpenPublisher(url, exchange, queue string) (*Publisher, error) {
-	connection, err := amqp.Dial(url)
+	connection, channel, err := openPublisherConnection(url, exchange, queue)
 	if err != nil {
-		return nil, fmt.Errorf("dial RabbitMQ: %w", err)
-	}
-
-	channel, err := connection.Channel()
-	if err != nil {
-		_ = connection.Close()
-
-		return nil, fmt.Errorf("open RabbitMQ channel: %w", err)
-	}
-
-	if err := declareTopology(channel, exchange, queue); err != nil {
-		_ = channel.Close()
-		_ = connection.Close()
-
 		return nil, err
 	}
 
-	if err := channel.Confirm(false); err != nil {
-		_ = channel.Close()
-		_ = connection.Close()
-
-		return nil, fmt.Errorf("enable RabbitMQ publisher confirms: %w", err)
-	}
-
 	return &Publisher{
+		url:        url,
 		connection: connection,
 		channel:    channel,
 		exchange:   exchange,
+		queue:      queue,
 	}, nil
 }
 
@@ -98,20 +82,20 @@ func (p *Publisher) PublishAvatarDeleted(ctx context.Context, avatar model.Avata
 	return p.publish(ctx, event.AvatarDeletedRoutingKey, message.MessageID, message.CreatedAt, message)
 }
 
-// Ping проверяет, что RabbitMQ connection и channel Publisher остаются открытыми.
+// Ping проверяет доступность RabbitMQ и восстанавливает publisher connection после разрыва.
 func (p *Publisher) Ping(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if p.connection == nil || p.connection.IsClosed() {
-		return errors.New("rabbitmq connection is closed")
-	}
-	if p.channel == nil || p.channel.IsClosed() {
-		return errors.New("rabbitmq channel is closed")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if err := p.ensureConnectedLocked(); err != nil {
+		return err
 	}
 
-	return nil
+	return ctx.Err()
 }
 
 // Close закрывает RabbitMQ channel и connection Publisher.
@@ -119,19 +103,9 @@ func (p *Publisher) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var resultErr error
-	if p.channel != nil {
-		if err := p.channel.Close(); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("close RabbitMQ channel: %w", err))
-		}
-	}
-	if p.connection != nil {
-		if err := p.connection.Close(); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("close RabbitMQ connection: %w", err))
-		}
-	}
+	p.closed = true
 
-	return resultErr
+	return p.closeConnectionLocked()
 }
 
 func (c amqpTableCarrier) Get(key string) string {
@@ -195,7 +169,18 @@ func (p *Publisher) publish(
 	otel.GetTextMapPropagator().Inject(ctx, amqpTableCarrier(headers))
 
 	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := p.ensureConnectedLocked(); err != nil {
+		return fmt.Errorf("connect RabbitMQ before publishing %s event: %w", routingKey, err)
+	}
+
 	confirmCtx, cancel := context.WithTimeout(ctx, publisherConfirmTimeout)
+	defer cancel()
+
 	confirmation, err := p.channel.PublishWithDeferredConfirmWithContext(
 		confirmCtx,
 		p.exchange,
@@ -212,9 +197,6 @@ func (p *Publisher) publish(
 			Body:         body,
 		},
 	)
-	p.mu.Unlock()
-	defer cancel()
-
 	if err != nil {
 		return fmt.Errorf("publish %s event: %w", routingKey, err)
 	}
@@ -231,6 +213,76 @@ func (p *Publisher) publish(
 	}
 
 	return nil
+}
+
+func (p *Publisher) ensureConnectedLocked() error {
+	if p.closed {
+		return errors.New("rabbitmq publisher is closed")
+	}
+	if p.connection != nil && !p.connection.IsClosed() && p.channel != nil && !p.channel.IsClosed() {
+		return nil
+	}
+
+	_ = p.closeConnectionLocked()
+
+	connection, channel, err := openPublisherConnection(p.url, p.exchange, p.queue)
+	if err != nil {
+		return err
+	}
+
+	p.connection = connection
+	p.channel = channel
+
+	return nil
+}
+
+func (p *Publisher) closeConnectionLocked() error {
+	var resultErr error
+	if p.channel != nil && !p.channel.IsClosed() {
+		if err := p.channel.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close RabbitMQ channel: %w", err))
+		}
+	}
+	if p.connection != nil && !p.connection.IsClosed() {
+		if err := p.connection.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close RabbitMQ connection: %w", err))
+		}
+	}
+
+	p.channel = nil
+	p.connection = nil
+
+	return resultErr
+}
+
+func openPublisherConnection(url, exchange, queue string) (*amqp.Connection, *amqp.Channel, error) {
+	connection, err := amqp.Dial(url)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dial RabbitMQ: %w", err)
+	}
+
+	channel, err := connection.Channel()
+	if err != nil {
+		_ = connection.Close()
+
+		return nil, nil, fmt.Errorf("open RabbitMQ channel: %w", err)
+	}
+
+	if err := declareTopology(channel, exchange, queue); err != nil {
+		_ = channel.Close()
+		_ = connection.Close()
+
+		return nil, nil, err
+	}
+
+	if err := channel.Confirm(false); err != nil {
+		_ = channel.Close()
+		_ = connection.Close()
+
+		return nil, nil, fmt.Errorf("enable RabbitMQ publisher confirms: %w", err)
+	}
+
+	return connection, channel, nil
 }
 
 func avatarS3Keys(avatar model.Avatar) []string {
