@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: gophprofile-worker:d4da5dd
+          image: gophprofile-worker:local
           imagePullPolicy: Never
           ports:
             - name: metrics

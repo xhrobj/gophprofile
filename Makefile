@@ -38,7 +38,7 @@ MIGRATE := $(BIN_DIR)/migrate
 
 # локальные Kubernetes images и Docker context Rancher Desktop
 K8S_DOCKER_CONTEXT ?= rancher-desktop
-K8S_IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
+K8S_IMAGE_TAG ?= local
 K8S_SERVER_IMAGE ?= gophprofile-server:$(K8S_IMAGE_TAG)
 K8S_WORKER_IMAGE ?= gophprofile-worker:$(K8S_IMAGE_TAG)
 K8S_MIGRATE_IMAGE ?= gophprofile-migrate:$(K8S_IMAGE_TAG)

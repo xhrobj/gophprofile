@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: server
-          image: gophprofile-server:d4da5dd
+          image: gophprofile-server:local
           imagePullPolicy: Never
           ports:
             - name: http
