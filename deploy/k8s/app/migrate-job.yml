@@ -19,6 +19,13 @@ spec:
         - name: migrate
           image: gophprofile-migrate:local
           imagePullPolicy: Never
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
           env:
             - name: DATABASE_DSN
               valueFrom:

@@ -23,6 +23,13 @@ spec:
         - name: rabbitmq
           image: rabbitmq:4.3.4-management
           imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
           env:
             - name: RABBITMQ_DEFAULT_USER
               valueFrom:
