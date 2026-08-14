@@ -1,0 +1,53 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gophprofile-alerts
+  namespace: gophprofile
+  labels:
+    app.kubernetes.io/name: gophprofile
+    app.kubernetes.io/component: monitoring
+spec:
+  groups:
+    - name: gophprofile-http
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            (
+              sum(rate(gophprofile_http_requests_total{service="server",status_class="5xx"}[5m]))
+              /
+              sum(rate(gophprofile_http_requests_total{service="server"}[5m]))
+            ) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: (o_0) High HTTP 5xx error rate
+            description: More than 10% of server HTTP requests have returned 5xx responses for 5 minutes.
+
+        - alert: HighResponseTime
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum(rate(gophprofile_http_request_duration_seconds_bucket{service="server"}[5m])) by (le)
+            ) > 5
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: (-_-)Zzz High HTTP response time
+            description: Server HTTP p95 response time has exceeded 5 seconds for 2 minutes.
+
+    - name: gophprofile-kubernetes
+      rules:
+        - alert: ServerUnavailable
+          expr: |
+            kube_deployment_status_replicas_available{
+              namespace="gophprofile",
+              deployment="server"
+            } == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: (x_x) Server unavailable
+            description: No Server replicas have been available for 1 minute.
