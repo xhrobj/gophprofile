@@ -190,3 +190,20 @@ migration:
       limits:
         memory: 32Mi
         cpu: 50m
+
+networkPolicy:
+  enabled: true
+  systemNamespace: kube-system
+  monitoringNamespace: monitoring
+  traefikPodName: traefik
+  prometheusPodName: prometheus
+  prometheusInstance: monitoring-kube-prometheus-prometheus
+  dnsPodLabel: kube-dns
+
+monitoring:
+  enabled: true
+  serviceMonitor:
+    interval: 15s
+    scrapeTimeout: 10s
+  alerts:
+    enabled: true

@@ -1,0 +1,67 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gophprofile-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "server") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "server") | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+      relabelings:
+        - action: replace
+          targetLabel: service
+          replacement: server
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gophprofile-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "worker") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "worker") | nindent 6 }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+      relabelings:
+        - action: replace
+          targetLabel: service
+          replacement: worker
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gophprofile-rabbitmq
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "rabbitmq") | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "rabbitmq") | nindent 6 }}
+  endpoints:
+    - port: prometheus
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+    - port: prometheus
+      path: /metrics/detailed
+      params:
+        family:
+          - queue_coarse_metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+{{- end }}

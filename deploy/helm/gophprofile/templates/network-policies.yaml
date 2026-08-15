@@ -1,0 +1,254 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "server") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "server") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.systemNamespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Values.networkPolicy.traefikPodName }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Values.networkPolicy.prometheusPodName }}
+              app.kubernetes.io/instance: {{ .Values.networkPolicy.prometheusInstance }}
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "postgres") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.service.port }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "minio") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.minio.service.apiPort }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "rabbitmq") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.rabbitmq.service.amqpPort }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "worker") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "worker") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Values.networkPolicy.prometheusPodName }}
+              app.kubernetes.io/instance: {{ .Values.networkPolicy.prometheusInstance }}
+      ports:
+        - protocol: TCP
+          port: 9092
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "postgres") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.service.port }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "minio") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.minio.service.apiPort }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "rabbitmq") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.rabbitmq.service.amqpPort }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: migrate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "migrate") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "migrate") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "postgres") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.service.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "postgres") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "postgres") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "server") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "worker") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "migrate") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.service.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minio
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "minio") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "minio") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "server") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "worker") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.minio.service.apiPort }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rabbitmq
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "rabbitmq") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "rabbitmq") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "server") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "gophprofile.selectorLabels" (list . "worker") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.rabbitmq.service.amqpPort }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Values.networkPolicy.prometheusPodName }}
+              app.kubernetes.io/instance: {{ .Values.networkPolicy.prometheusInstance }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.rabbitmq.service.prometheusPort }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.systemNamespace }}
+          podSelector:
+            matchLabels:
+              k8s-app: {{ .Values.networkPolicy.dnsPodLabel }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+{{- end }}
