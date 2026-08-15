@@ -1,0 +1,93 @@
+server:
+  replicas: 2
+  image:
+    repository: gophprofile-server
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 4
+    failureThreshold: 3
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    cpuAverageUtilization: 70
+    memoryAverageUtilization: 80
+
+worker:
+  replicas: 1
+  image:
+    repository: gophprofile-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+pod:
+  terminationGracePeriodSeconds: 30
+
+config:
+  s3:
+    endpoint: minio:9000
+    bucket: avatars
+    useSSL: false
+  rabbitmq:
+    exchange: avatars.exchange
+    queue: avatars.processing
+  tracing:
+    enabled: false
+    otlpEndpoint: http://jaeger:4318
+  httpAddress: ":8080"
+  maxUploadSize: "10485760"
+  workerMetricsAddress: ":9092"
+  shutdownTimeout: 10s
+  logLevel: info
+
+secrets:
+  create: false
+  name: gophprofile-secrets
+  databaseDsn: ""
+  s3AccessKey: ""
+  s3SecretKey: ""
+  rabbitmqUrl: ""
+
+ingress:
+  enabled: true
+  className: traefik
+  host: gophprofile.local
+  entryPoints: web
+  uploadLimit:
+    maxRequestBodyBytes: "11534336"
+  rateLimit:
+    average: 20
+    period: 1s
+    burst: 40

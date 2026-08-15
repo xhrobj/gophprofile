@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "server") | nindent 4 }}
+spec:
+  {{- if not .Values.server.hpa.enabled }}
+  replicas: {{ .Values.server.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "server") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gophprofile.selectorLabels" (list . "server") | nindent 8 }}
+    spec:
+      serviceAccountName: gophprofile-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: {{ .Values.pod.terminationGracePeriodSeconds }}
+      containers:
+        - name: server
+          image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: gophprofile-config
+            - secretRef:
+                name: {{ .Values.secrets.name }}
+          resources:
+            {{- toYaml .Values.server.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            {{- toYaml .Values.server.livenessProbe | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            {{- toYaml .Values.server.readinessProbe | nindent 12 }}
+      restartPolicy: Always
