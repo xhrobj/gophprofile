@@ -28,7 +28,13 @@ type DownloadOutput struct {
 var ErrInvalidAvatarSize = errors.New("invalid avatar size")
 
 // Download открывает оригинал или готовую миниатюру аватарки для потоковой отдачи.
-func (s *AvatarService) Download(ctx context.Context, input DownloadInput) (DownloadOutput, error) {
+func (s *AvatarService) Download(
+	ctx context.Context,
+	input DownloadInput,
+) (result DownloadOutput, resultErr error) {
+	defer func() {
+		resultErr = normalizeDependencyError(resultErr)
+	}()
 	avatar, err := s.findAvatar(ctx, input)
 	if err != nil {
 		return DownloadOutput{}, err

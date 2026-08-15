@@ -122,6 +122,7 @@ func (s *AvatarService) Upload(ctx context.Context, input UploadInput) (result m
 	startedAt := time.Now()
 	ctx, span := otel.Tracer(serviceInstrumentationName).Start(ctx, "upload avatar")
 	defer func() {
+		resultErr = normalizeDependencyError(resultErr)
 		finishSpan(span, resultErr)
 		if s.metrics != nil {
 			s.metrics.ObserveAvatarUpload(resultErr == nil, int64(len(input.Content)), time.Since(startedAt))

@@ -11,6 +11,7 @@ import (
 
 	"github.com/xhrobj/gophprofile/internal/logger"
 	"github.com/xhrobj/gophprofile/internal/model"
+	"github.com/xhrobj/gophprofile/internal/service"
 )
 
 type avatarMetadataReader interface {
@@ -103,8 +104,18 @@ func (h *metadataHandler) listByUserID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *metadataHandler) writeReadError(w http.ResponseWriter, r *http.Request, err error, message string) {
-	if errors.Is(err, model.ErrAvatarNotFound) {
+	switch {
+	case errors.Is(err, model.ErrAvatarNotFound):
 		writeError(w, r, http.StatusNotFound, "avatar_not_found", "avatar not found", 0)
+
+		return
+	case errors.Is(err, service.ErrServiceUnavailable):
+		logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).ErrorContext(
+			r.Context(),
+			"avatar metadata dependency unavailable",
+			slog.Any("error", err),
+		)
+		writeError(w, r, http.StatusServiceUnavailable, "service_unavailable", "service temporarily unavailable", 0)
 
 		return
 	}

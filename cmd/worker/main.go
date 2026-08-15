@@ -72,7 +72,7 @@ func run(ctx context.Context) error {
 	}
 	defer pool.Close()
 
-	storage, err := s3.Open(
+	storageClient, err := s3.Open(
 		ctx,
 		cfg.S3Endpoint,
 		cfg.S3AccessKey,
@@ -83,6 +83,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open S3 storage: %w", err)
 	}
+	storage := s3.NewResilientStorage(storageClient, lg)
 
 	consumer, err := rabbitmq.OpenConsumer(cfg.RabbitMQURL, cfg.RabbitMQExchange, cfg.RabbitMQQueue)
 	if err != nil {
@@ -116,9 +117,10 @@ func run(ctx context.Context) error {
 		),
 	}
 
+	avatarRepository := postgres.NewResilientAvatarRepository(postgres.NewAvatarRepository(pool), lg)
 	avatarWorker := worker.New(
 		consumer,
-		postgres.NewAvatarRepository(pool),
+		avatarRepository,
 		storage,
 		imageprocessor.New(),
 		metrics,

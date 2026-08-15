@@ -114,6 +114,12 @@ func TestDownloadHandler_Error(t *testing.T) {
 			wantCode:   "avatar_not_found",
 		},
 		{
+			name:       "dependency unavailable",
+			err:        service.ErrServiceUnavailable,
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "service_unavailable",
+		},
+		{
 			name:       "internal error",
 			err:        errors.New("download"),
 			wantStatus: http.StatusInternalServerError,

@@ -140,8 +140,9 @@ services:
         - CMD
         - /usr/bin/loki
         - -health
-      interval: 5s
-      timeout: 5s
+      start_period: 30s
+      interval: 10s
+      timeout: 10s
       retries: 5
 
   alloy:
