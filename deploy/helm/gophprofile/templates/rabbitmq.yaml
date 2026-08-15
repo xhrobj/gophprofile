@@ -1,0 +1,100 @@
+{{- if .Values.rabbitmq.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "rabbitmq") | nindent 4 }}
+data:
+  enabled_plugins: |
+    [rabbitmq_management,rabbitmq_prometheus].
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "rabbitmq") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "gophprofile.selectorLabels" (list . "rabbitmq") | nindent 4 }}
+  ports:
+    - name: amqp
+      port: {{ .Values.rabbitmq.service.amqpPort }}
+      targetPort: amqp
+    - name: management
+      port: {{ .Values.rabbitmq.service.managementPort }}
+      targetPort: management
+    - name: prometheus
+      port: {{ .Values.rabbitmq.service.prometheusPort }}
+      targetPort: prometheus
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "rabbitmq") | nindent 4 }}
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "rabbitmq") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gophprofile.selectorLabels" (list . "rabbitmq") | nindent 8 }}
+    spec:
+      containers:
+        - name: rabbitmq
+          image: "{{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}"
+          imagePullPolicy: {{ .Values.rabbitmq.image.pullPolicy }}
+          resources:
+            {{- toYaml .Values.rabbitmq.resources | nindent 12 }}
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rabbitmq.auth.secretName }}
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rabbitmq.auth.secretName }}
+                  key: RABBITMQ_DEFAULT_PASS
+          ports:
+            - name: amqp
+              containerPort: {{ .Values.rabbitmq.service.amqpPort }}
+            - name: management
+              containerPort: {{ .Values.rabbitmq.service.managementPort }}
+            - name: prometheus
+              containerPort: {{ .Values.rabbitmq.service.prometheusPort }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+            - name: config
+              mountPath: /etc/rabbitmq/enabled_plugins
+              subPath: enabled_plugins
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: rabbitmq-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- with .Values.rabbitmq.persistence.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.rabbitmq.persistence.size }}
+{{- end }}

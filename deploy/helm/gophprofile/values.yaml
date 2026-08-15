@@ -91,3 +91,102 @@ ingress:
     average: 20
     period: 1s
     burst: 40
+
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "17.10"
+    pullPolicy: IfNotPresent
+  database: gophprofile
+  user: gophprofile
+  auth:
+    create: false
+    secretName: postgres-secrets
+    password: ""
+  service:
+    port: 5432
+  persistence:
+    storageClassName: local-path
+    size: 1Gi
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 256Mi
+      cpu: 250m
+
+minio:
+  enabled: true
+  image:
+    repository: quay.io/minio/minio
+    tag: RELEASE.2025-09-07T16-13-09Z
+    pullPolicy: IfNotPresent
+  auth:
+    create: false
+    secretName: minio-secrets
+    rootUser: ""
+    rootPassword: ""
+  service:
+    apiPort: 9000
+    consolePort: 9001
+  persistence:
+    storageClassName: local-path
+    size: 1Gi
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 50m
+    limits:
+      memory: 256Mi
+      cpu: 250m
+
+rabbitmq:
+  enabled: true
+  image:
+    repository: rabbitmq
+    tag: 4.3.4-management
+    pullPolicy: IfNotPresent
+  auth:
+    create: false
+    secretName: rabbitmq-secrets
+    username: ""
+    password: ""
+  service:
+    amqpPort: 5672
+    managementPort: 15672
+    prometheusPort: 15692
+  persistence:
+    storageClassName: local-path
+    size: 1Gi
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 384Mi
+      cpu: 500m
+
+migration:
+  enabled: true
+  image:
+    repository: gophprofile-migrate
+    tag: latest
+    pullPolicy: IfNotPresent
+  backoffLimit: 6
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 250m
+  waitForPostgres:
+    resources:
+      requests:
+        memory: 16Mi
+        cpu: 10m
+      limits:
+        memory: 32Mi
+        cpu: 50m
