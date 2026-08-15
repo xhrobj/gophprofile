@@ -221,6 +221,10 @@ Prometheus отправляет сработавшие алерты в Alertmana
   <img src="docs/images/observability/alertmanager-high-error-rate-preview.jpg" alt="Alertmanager HighErrorRate">
 </a>
 
+## Kubernetes
+
+В Kubernetes внешний HTTP-трафик Server проходит через Traefik Ingress. На Ingress настроены ограничение размера upload и rate limiting. В текущей конфигурации rate limit составляет 20 запросов в секунду с burst до 40 запросов. Внутренние metrics и health checks через публичный Ingress не маршрутизируются.
+
 ## Основные команды
 
 ```text
