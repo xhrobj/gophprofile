@@ -23,6 +23,12 @@ func TestNormalizeDependencyError(t *testing.T) {
 			wantOriginalErrIs: resilience.ErrCircuitOpen,
 		},
 		{
+			name:              "maps dependency failure to unavailable",
+			err:               resilience.ErrDependencyUnavailable,
+			wantUnavailable:   true,
+			wantOriginalErrIs: resilience.ErrDependencyUnavailable,
+		},
+		{
 			name:              "keeps ordinary dependency error",
 			err:               dependencyErr,
 			wantOriginalErrIs: dependencyErr,

@@ -24,12 +24,18 @@ type breakerConfig struct {
 
 // CircuitBreaker защищает одну внешнюю зависимость процесса от повторных заведомо неуспешных вызовов.
 type CircuitBreaker struct {
-	name  string
-	inner *gobreaker.TwoStepCircuitBreaker[struct{}]
+	name           string
+	excludedErrors []error
+	inner          *gobreaker.TwoStepCircuitBreaker[struct{}]
 }
 
-// ErrCircuitOpen означает, что вызов внешней зависимости отклонён открытым circuit breaker.
-var ErrCircuitOpen = errors.New("circuit breaker is open")
+var (
+	// ErrCircuitOpen означает, что вызов внешней зависимости отклонён открытым circuit breaker.
+	ErrCircuitOpen = errors.New("circuit breaker is open")
+
+	// ErrDependencyUnavailable означает, что разрешённый breaker'ом вызов внешней зависимости завершился ошибкой.
+	ErrDependencyUnavailable = errors.New("dependency unavailable")
+)
 
 // NewCircuitBreaker создаёт circuit breaker для одной внешней зависимости процесса.
 func NewCircuitBreaker(name string, lg *slog.Logger, excludedErrors ...error) *CircuitBreaker {
@@ -58,8 +64,11 @@ func Execute[T any](breaker *CircuitBreaker, operation func() (T, error)) (T, er
 
 	result, operationErr := operation()
 	done(operationErr)
+	if operationErr == nil || breaker.isExcluded(operationErr) {
+		return result, operationErr
+	}
 
-	return result, operationErr
+	return result, fmt.Errorf("%w: %s: %w", ErrDependencyUnavailable, breaker.name, operationErr)
 }
 
 // Do выполняет операцию без возвращаемого значения через circuit breaker.
@@ -76,7 +85,10 @@ func newCircuitBreaker(name string, lg *slog.Logger, cfg breakerConfig) *Circuit
 		lg = slog.Default()
 	}
 
-	breaker := &CircuitBreaker{name: name}
+	breaker := &CircuitBreaker{
+		name:           name,
+		excludedErrors: append([]error(nil), cfg.excludedErrors...),
+	}
 	breaker.inner = gobreaker.NewTwoStepCircuitBreaker[struct{}](gobreaker.Settings{
 		Name:        name,
 		MaxRequests: 1,
@@ -94,22 +106,24 @@ func newCircuitBreaker(name string, lg *slog.Logger, cfg breakerConfig) *Circuit
 				slog.String("to", to.String()),
 			)
 		},
-		IsExcluded: func(err error) bool {
-			if errors.Is(err, context.Canceled) {
-				return true
-			}
-
-			for _, excluded := range cfg.excludedErrors {
-				if excluded != nil && errors.Is(err, excluded) {
-					return true
-				}
-			}
-
-			return false
-		},
+		IsExcluded: breaker.isExcluded,
 	})
 
 	return breaker
+}
+
+func (b *CircuitBreaker) isExcluded(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+
+	for _, excluded := range b.excludedErrors {
+		if excluded != nil && errors.Is(err, excluded) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (b *CircuitBreaker) allow() (func(error), error) {

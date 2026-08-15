@@ -15,8 +15,7 @@ import (
 )
 
 const (
-	userIDHeader = "X-User-ID"
-
+	userIDHeader               = "X-User-ID"
 	multipartOverheadAllowance = 1 << 20
 )
 
@@ -84,7 +83,7 @@ func (h *uploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			)
 		case errors.Is(err, service.ErrServiceUnavailable):
 			logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).ErrorContext(r.Context(),
-				"failed to publish avatar processing event",
+				"avatar upload dependency unavailable",
 				slog.Any("error", err),
 			)
 			writeError(

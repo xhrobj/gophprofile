@@ -29,6 +29,9 @@ func TestCircuitBreakerOpenFailFastAndRecover(t *testing.T) {
 		if !errors.Is(err, dependencyErr) {
 			t.Fatalf("Do() error = %v, want dependency error", err)
 		}
+		if !errors.Is(err, ErrDependencyUnavailable) {
+			t.Fatalf("Do() error = %v, want ErrDependencyUnavailable", err)
+		}
 	}
 
 	err := Do(breaker, func() error {
@@ -84,8 +87,12 @@ func TestCircuitBreakerExcludesCancellationAndBusinessErrors(t *testing.T) {
 		fmtWrapped(context.Canceled),
 		fmtWrapped(businessErr),
 	} {
-		if got := Do(breaker, func() error { return err }); !errors.Is(got, err) {
+		got := Do(breaker, func() error { return err })
+		if !errors.Is(got, err) {
 			t.Fatalf("Do() error = %v, want %v", got, err)
+		}
+		if errors.Is(got, ErrDependencyUnavailable) {
+			t.Fatalf("Do() error = %v, excluded error must not be ErrDependencyUnavailable", got)
 		}
 	}
 

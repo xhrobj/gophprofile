@@ -168,6 +168,7 @@ test-integration: infra-up
 	go test -tags=integration -count=1 ./...
 
 # запустить end-to-end happy path через публичный HTTP API полного Compose-стека
+# NOTE: если в "тестовом кластере" мало ресурсов, после не забыть выполнить `make compose-down`
 test-e2e: compose-up
 	E2E_BASE_URL=http://127.0.0.1:8080 go test -tags=e2e -count=1 ./tests/e2e
 

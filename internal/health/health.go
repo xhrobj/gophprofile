@@ -22,7 +22,7 @@ type Pinger interface {
 // Component описывает результат проверки одной зависимости.
 type Component struct {
 	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
+	Error  string `json:"-"`
 }
 
 // Components содержит состояния обязательных зависимостей приложения.

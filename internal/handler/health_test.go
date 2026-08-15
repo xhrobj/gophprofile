@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/xhrobj/gophprofile/internal/health"
@@ -64,10 +65,18 @@ func TestHealthHandler(t *testing.T) {
 				t.Errorf("Content-Type = %q, want application/json", got)
 			}
 
+			if strings.Contains(response.Body.String(), "connection refused") {
+				t.Error("response leaks raw dependency error")
+			}
+
 			var body health.Report
 			decodeJSONResponse(t, response, &body)
-			if body != tt.report {
-				t.Errorf("response body = %+v, want %+v", body, tt.report)
+			wantBody := tt.report
+			wantBody.Components.Database.Error = ""
+			wantBody.Components.S3.Error = ""
+			wantBody.Components.Broker.Error = ""
+			if body != wantBody {
+				t.Errorf("response body = %+v, want %+v", body, wantBody)
 			}
 			if checker.calls != 1 {
 				t.Errorf("Check() calls = %d, want 1", checker.calls)

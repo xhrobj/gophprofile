@@ -249,7 +249,7 @@ services:
         - CMD
         - rabbitmq-diagnostics
         - -q
-        - ping
+        - check_port_connectivity
       interval: 5s
       timeout: 5s
       retries: 5

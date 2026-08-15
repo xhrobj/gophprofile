@@ -19,7 +19,7 @@ func normalizeDependencyError(err error) error {
 	if err == nil || errors.Is(err, ErrServiceUnavailable) {
 		return err
 	}
-	if errors.Is(err, resilience.ErrCircuitOpen) {
+	if errors.Is(err, resilience.ErrCircuitOpen) || errors.Is(err, resilience.ErrDependencyUnavailable) {
 		return errors.Join(ErrServiceUnavailable, err)
 	}
 

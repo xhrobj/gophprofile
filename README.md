@@ -265,6 +265,16 @@ make clean             удалить локальные бинарники и c
 
 Поддерживаются JPEG, PNG и WebP размером до 10 MiB. Миниатюры создаются асинхронно, поэтому сразу после `201 Created` их получение может временно возвращать `404`; готовность отражается в `processing_status` metadata.
 
+Ошибки, сформированные Server, возвращаются в едином JSON-формате с `error`, безопасным `details` и `request_id`:
+
+- `400 Bad Request` — некорректный запрос
+- `404 Not Found` — ресурс не найден
+- `413 Content Too Large` — превышен допустимый размер upload
+- `500 Internal Server Error` — неожиданная внутренняя ошибка
+- `503 Service Unavailable` — временно недоступны PostgreSQL, S3 или RabbitMQ
+
+Технические детали внутренних и dependency errors остаются в структурированных логах и не передаются клиенту. `429 Too Many Requests` при превышении ingress rate limit формирует Traefik до передачи запроса Server.
+
 Пример загрузки:
 
 ```bash
