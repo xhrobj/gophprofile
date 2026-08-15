@@ -350,6 +350,10 @@ func doRequest(
 ) []byte {
 	t.Helper()
 
+	if host := strings.TrimSpace(os.Getenv("E2E_HOST")); host != "" {
+		req.Host = host
+	}
+
 	response, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("%s %s: %v", req.Method, req.URL, err)

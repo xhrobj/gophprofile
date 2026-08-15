@@ -14,6 +14,9 @@ spec:
       {{- include "gophprofile.selectorLabels" (list . "server") | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels:
         {{- include "gophprofile.selectorLabels" (list . "server") | nindent 8 }}
     spec:
@@ -26,6 +29,10 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       terminationGracePeriodSeconds: {{ .Values.pod.terminationGracePeriodSeconds }}
+      {{- if .Values.migration.enabled }}
+      initContainers:
+        {{- include "gophprofile.waitForSchemaInitContainer" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: server
           image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
@@ -56,4 +63,8 @@ spec:
               path: /health
               port: http
             {{- toYaml .Values.server.readinessProbe | nindent 12 }}
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.server.terminationDrainSeconds }}
       restartPolicy: Always

@@ -12,6 +12,9 @@ spec:
       {{- include "gophprofile.selectorLabels" (list . "worker") | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels:
         {{- include "gophprofile.selectorLabels" (list . "worker") | nindent 8 }}
     spec:
@@ -24,6 +27,10 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       terminationGracePeriodSeconds: {{ .Values.pod.terminationGracePeriodSeconds }}
+      {{- if .Values.migration.enabled }}
+      initContainers:
+        {{- include "gophprofile.waitForSchemaInitContainer" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: worker
           image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"

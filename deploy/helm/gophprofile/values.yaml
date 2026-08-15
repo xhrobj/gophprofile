@@ -21,6 +21,7 @@ server:
     periodSeconds: 10
     timeoutSeconds: 4
     failureThreshold: 3
+  terminationDrainSeconds: 5
   hpa:
     enabled: true
     minReplicas: 2
@@ -93,7 +94,6 @@ ingress:
     burst: 40
 
 postgres:
-  enabled: true
   image:
     repository: postgres
     tag: "17.10"
@@ -118,7 +118,6 @@ postgres:
       cpu: 250m
 
 minio:
-  enabled: true
   image:
     repository: quay.io/minio/minio
     tag: RELEASE.2025-09-07T16-13-09Z
@@ -143,7 +142,6 @@ minio:
       cpu: 250m
 
 rabbitmq:
-  enabled: true
   image:
     repository: rabbitmq
     tag: 4.3.4-management
@@ -183,6 +181,14 @@ migration:
       memory: 128Mi
       cpu: 250m
   waitForPostgres:
+    resources:
+      requests:
+        memory: 16Mi
+        cpu: 10m
+      limits:
+        memory: 32Mi
+        cpu: 50m
+  waitForSchema:
     resources:
       requests:
         memory: 16Mi

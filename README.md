@@ -223,12 +223,61 @@ Prometheus отправляет сработавшие алерты в Alertmana
 
 ## Kubernetes
 
-В Kubernetes внешний HTTP-трафик Server проходит через Traefik Ingress. На Ingress настроены ограничение размера upload и rate limiting. В текущей конфигурации rate limit составляет 20 запросов в секунду с burst до 40 запросов. Внутренние metrics и health checks через публичный Ingress не маршрутизируются.
+Kubernetes deployment GophProfile упакован в Helm Chart `deploy/helm/gophprofile`. Chart разворачивает Server, Worker, PostgreSQL, MinIO, RabbitMQ, migration Job, HPA, Traefik Ingress, NetworkPolicy, ServiceMonitor и PrometheusRule. `kube-prometheus-stack` остаётся инфраструктурой кластера и устанавливается отдельно.
+
+Для локального Rancher Desktop сначала подготовьте Secret-файлы из `.example` и заполните их локальными значениями:
+
+```bash
+cp deploy/k8s/app/secret.yml.example deploy/k8s/app/secret.yml
+cp deploy/k8s/postgres/secret.yml.example deploy/k8s/postgres/secret.yml
+cp deploy/k8s/minio/secret.yml.example deploy/k8s/minio/secret.yml
+cp deploy/k8s/rabbitmq/secret.yml.example deploy/k8s/rabbitmq/secret.yml
+```
+
+Реальные Secret-файлы исключены из Git. Monitoring stack нужен до установки application Chart, потому что Chart создает `ServiceMonitor` и `PrometheusRule`:
+
+```bash
+make k8s-monitoring-up
+make helm-check
+make build-k8s-images
+```
+
+Namespace и внешние Secrets создаются отдельно от Helm release:
+
+```bash
+kubectl create namespace gophprofile --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl apply -n gophprofile \
+  -f deploy/k8s/app/secret.yml \
+  -f deploy/k8s/postgres/secret.yml \
+  -f deploy/k8s/minio/secret.yml \
+  -f deploy/k8s/rabbitmq/secret.yml
+```
+
+Локальные параметры образов и Rancher Desktop собраны в `values-local.yaml`. Release устанавливается или обновляется обычной командой Helm:
+
+```bash
+helm upgrade --install gophprofile deploy/helm/gophprofile \
+  --namespace gophprofile \
+  -f deploy/helm/gophprofile/values-local.yaml \
+  --timeout 5m
+
+kubectl rollout status deployment/server -n gophprofile --timeout=120s
+kubectl rollout status deployment/worker -n gophprofile --timeout=120s
+```
+
+При первой установке migration Job запускается как `post-install` hook и ждёт доступности PostgreSQL; init containers Server и Worker не пропускают workloads дальше старта, пока `schema_migrations` не зафиксирует успешно завершённую миграцию. При upgrade тот же Job выполняется как `pre-upgrade` hook до обновления workloads. Поэтому для первой установки Helm не запускается с `--wait`: иначе ожидание Ready application Pods происходило бы раньше `post-install` hook.
+
+Статус release можно посмотреть командой `helm status gophprofile -n gophprofile`, удалить release — `helm uninstall gophprofile -n gophprofile`. Успешный migration hook удаляется Helm автоматически; при ошибке Job остаётся для диагностики. Локальные Secrets и persistent PVC в lifecycle Helm release не входят и после uninstall сохраняются.
+
+После перехода на Chart Helm templates являются единственным источником application Kubernetes manifests. В `deploy/k8s/` остаются только bootstrap-файлы вне application release: Namespace, `.example` для локальных Secrets и `monitoring/values.yml` для внешнего `kube-prometheus-stack`.
+
+Внешний HTTP-трафик Server проходит через Traefik Ingress. На Ingress настроены ограничение размера upload и rate limiting: 20 запросов в секунду с burst до 40. Внутренние metrics и health checks через публичный Ingress не маршрутизируются.
 
 ## Основные команды
 
 ```text
-make build             собрать Server и Worker
+make build             собрать Server, Worker и Migrator
 make run-server        поднять инфраструктуру, собрать и запустить Server локально
 make run-worker        поднять инфраструктуру, собрать и запустить Worker локально
 make infra-up          поднять PostgreSQL, MinIO и RabbitMQ
@@ -236,6 +285,9 @@ make infra-down        остановить локальную инфрастр�
 make infra-erase       удалить инфраструктуру и persistent volumes
 make compose-up        собрать и поднять полный стек Server + Worker + инфраструктура
 make compose-down      остановить полный стек без удаления данных
+make build-k8s-images  собрать локальные Kubernetes images
+make k8s-monitoring-up установить/обновить kube-prometheus-stack
+make helm-check        проверить Helm Chart: lint + semantic render tests
 make test              запустить обычные тесты
 make test-race         запустить обычные тесты с race detector
 make test-integration  запустить integration-тесты с реальной инфраструктурой

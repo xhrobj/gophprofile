@@ -2,13 +2,14 @@
 	show-coverage \
 	build build-server build-worker build-migrate build-k8s-images \
 	k8s-monitoring-up k8s-monitoring-down \
+	helm-lint helm-test helm-check \
 	db-up db-connect \
 	s3-up \
 	rabbitmq-up \
 	infra-up infra-down infra-erase \
 	run-server run-worker \
 	compose-up compose-down compose-logs \
-	test-all test test-race test-integration test-e2e \
+	test-all test test-race test-integration test-e2e test-k8s-e2e \
 	coverage \
 	vet lint ci \
 	clean
@@ -43,6 +44,13 @@ K8S_IMAGE_TAG ?= local
 K8S_SERVER_IMAGE ?= gophprofile-server:$(K8S_IMAGE_TAG)
 K8S_WORKER_IMAGE ?= gophprofile-worker:$(K8S_IMAGE_TAG)
 K8S_MIGRATE_IMAGE ?= gophprofile-migrate:$(K8S_IMAGE_TAG)
+
+# Helm Chart приложения
+HELM_CHART ?= deploy/helm/gophprofile
+
+# E2E через локальный Kubernetes Ingress
+K8S_E2E_BASE_URL ?= http://127.0.0.1
+K8S_E2E_HOST ?= gophprofile.local
 
 # Kubernetes monitoring stack
 K8S_MONITORING_NAMESPACE ?= monitoring
@@ -84,6 +92,17 @@ build-k8s-images:
 	docker build --target migrate -t $(K8S_MIGRATE_IMAGE) .
 	@printf '(*_*) Built Kubernetes images:\n  %s\n  %s\n  %s\n' \
 		"$(K8S_SERVER_IMAGE)" "$(K8S_WORKER_IMAGE)" "$(K8S_MIGRATE_IMAGE)"
+
+# проверить Helm Chart статическим линтером
+helm-lint:
+	helm lint $(HELM_CHART)
+
+# проверить критичные контракты rendered Helm manifests
+helm-test:
+	go test -tags=helm -count=1 ./tests/helm
+
+# выполнить все локальные проверки Helm Chart
+helm-check: helm-lint helm-test
 
 # установить или обновить Kubernetes monitoring stack через Helm
 k8s-monitoring-up:
@@ -171,6 +190,12 @@ test-integration: infra-up
 # NOTE: если в "тестовом кластере" мало ресурсов, после не забыть выполнить `make compose-down`
 test-e2e: compose-up
 	E2E_BASE_URL=http://127.0.0.1:8080 go test -tags=e2e -count=1 ./tests/e2e
+
+# запустить end-to-end Happy Path через Traefik Ingress локального Kubernetes
+test-k8s-e2e:
+	E2E_BASE_URL=$(K8S_E2E_BASE_URL) \
+	E2E_HOST=$(K8S_E2E_HOST) \
+	go test -tags=e2e -count=1 ./tests/e2e
 
 # запустить обычные и интеграционные тесты
 # и сохранить атомарный профиль покрытия всего проекта
