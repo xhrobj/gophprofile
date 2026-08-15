@@ -23,6 +23,30 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       restartPolicy: Never
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:17.10
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p 5432 -U gophprofile -d gophprofile -t 1; do
+                sleep 1
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
       containers:
         - name: migrate
           image: gophprofile-migrate:local
