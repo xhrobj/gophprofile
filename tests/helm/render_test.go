@@ -23,6 +23,9 @@ func TestRenderContracts(t *testing.T) {
 	workerMonitor := findDocument(t, rendered, "ServiceMonitor", "gophprofile-worker")
 	ingress := findDocument(t, rendered, "Ingress", "server")
 	migrateJob := findDocument(t, rendered, "Job", "migrate")
+	postgresStatefulSet := findDocument(t, rendered, "StatefulSet", "postgres")
+	minioStatefulSet := findDocument(t, rendered, "StatefulSet", "minio")
+	rabbitmqStatefulSet := findDocument(t, rendered, "StatefulSet", "rabbitmq")
 
 	assertContains(t, serverDeployment, "checksum/config:")
 	assertContains(t, serverDeployment, "checksum/secret:")
@@ -48,6 +51,29 @@ func TestRenderContracts(t *testing.T) {
 	assertNotContains(t, ingress, "path: /metrics")
 	assertContains(t, migrateJob, `"helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded`)
 	assertContains(t, migrateJob, "secretKeyRef:")
+
+	for name, workload := range map[string]string{
+		"server":   serverDeployment,
+		"worker":   workerDeployment,
+		"migrate":  migrateJob,
+		"postgres": postgresStatefulSet,
+		"minio":    minioStatefulSet,
+		"rabbitmq": rabbitmqStatefulSet,
+	} {
+		if !strings.Contains(workload, "ephemeral-storage:") {
+			t.Errorf("%s workload does not define ephemeral-storage resources", name)
+		}
+	}
+
+	for name, statefulSet := range map[string]string{
+		"postgres": postgresStatefulSet,
+		"minio":    minioStatefulSet,
+		"rabbitmq": rabbitmqStatefulSet,
+	} {
+		if !strings.Contains(statefulSet, "automountServiceAccountToken: false") {
+			t.Errorf("%s StatefulSet must disable service account token automounting", name)
+		}
+	}
 
 	if strings.Contains(rendered, "kind: Secret") {
 		t.Fatal("default values must not render Kubernetes Secret resources")

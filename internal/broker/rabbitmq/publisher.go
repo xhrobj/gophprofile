@@ -33,46 +33,6 @@ type contextMutex struct {
 	token chan struct{}
 }
 
-func (m *contextMutex) Lock() {
-	_ = m.LockContext(context.Background())
-}
-
-func (m *contextMutex) LockContext(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	m.once.Do(func() {
-		m.token = make(chan struct{}, 1)
-		m.token <- struct{}{}
-	})
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-m.token:
-		if err := ctx.Err(); err != nil {
-			m.token <- struct{}{}
-
-			return err
-		}
-
-		return nil
-	}
-}
-
-func (m *contextMutex) Unlock() {
-	m.once.Do(func() {
-		m.token = make(chan struct{}, 1)
-	})
-
-	select {
-	case m.token <- struct{}{}:
-	default:
-		panic("unlock of unlocked contextMutex")
-	}
-}
-
 // Publisher публикует события аватаров в RabbitMQ с publisher confirms.
 type Publisher struct {
 	url        string
@@ -155,6 +115,46 @@ func (p *Publisher) Close() error {
 	p.closed = true
 
 	return p.closeConnectionLocked()
+}
+
+func (m *contextMutex) Lock() {
+	_ = m.LockContext(context.Background())
+}
+
+func (m *contextMutex) LockContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	m.once.Do(func() {
+		m.token = make(chan struct{}, 1)
+		m.token <- struct{}{}
+	})
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.token:
+		if err := ctx.Err(); err != nil {
+			m.token <- struct{}{}
+
+			return err
+		}
+
+		return nil
+	}
+}
+
+func (m *contextMutex) Unlock() {
+	m.once.Do(func() {
+		m.token = make(chan struct{}, 1)
+	})
+
+	select {
+	case m.token <- struct{}{}:
+	default:
+		panic("unlock of unlocked contextMutex")
+	}
 }
 
 func (c amqpTableCarrier) Get(key string) string {
@@ -338,26 +338,7 @@ func openPublisherConnection(
 	}
 	defer finishSetup()
 
-	connection, err := amqp.DialConfig(url, amqp.Config{
-		Dial: func(network, addr string) (net.Conn, error) {
-			connection, dialErr := (&net.Dialer{}).DialContext(connectCtx, network, addr)
-			if dialErr != nil {
-				return nil, dialErr
-			}
-
-			if deadline, ok := connectCtx.Deadline(); ok {
-				if deadlineErr := connection.SetDeadline(deadline); deadlineErr != nil {
-					_ = connection.Close()
-
-					return nil, deadlineErr
-				}
-			}
-
-			go interruptRabbitMQSetup(connectCtx, setupDone, connection)
-
-			return connection, nil
-		},
-	})
+	connection, err := dialPublisherConnection(connectCtx, url, setupDone)
 	if err != nil {
 		if ctxErr := connectCtx.Err(); ctxErr != nil {
 			return nil, nil, fmt.Errorf("dial RabbitMQ: %w", ctxErr)
@@ -409,6 +390,33 @@ func openPublisherConnection(
 	finishSetup()
 
 	return connection, channel, nil
+}
+
+func dialPublisherConnection(
+	ctx context.Context,
+	url string,
+	setupDone <-chan struct{},
+) (*amqp.Connection, error) {
+	return amqp.DialConfig(url, amqp.Config{
+		Dial: func(network, addr string) (net.Conn, error) {
+			connection, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+
+			if deadline, ok := ctx.Deadline(); ok {
+				if err := connection.SetDeadline(deadline); err != nil {
+					_ = connection.Close()
+
+					return nil, err
+				}
+			}
+
+			go interruptRabbitMQSetup(ctx, setupDone, connection)
+
+			return connection, nil
+		},
+	})
 }
 
 func interruptRabbitMQSetup(ctx context.Context, setupDone <-chan struct{}, connection net.Conn) {

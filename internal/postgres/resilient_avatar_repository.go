@@ -8,11 +8,28 @@ import (
 	"github.com/xhrobj/gophprofile/internal/resilience"
 )
 
+type avatarRepository interface {
+	Create(context.Context, model.Avatar) (model.Avatar, error)
+	GetByID(context.Context, string) (model.Avatar, error)
+	GetCurrentByUserID(context.Context, string) (model.Avatar, error)
+	ListByUserID(context.Context, string) ([]model.Avatar, error)
+	UpdateUploadStatus(context.Context, string, model.UploadStatus) error
+	UpdateProcessingStatus(context.Context, string, model.ProcessingStatus) error
+	CompleteProcessing(context.Context, string, map[model.ThumbnailSize]string) error
+	DeletePermanent(context.Context, string) error
+	SoftDelete(context.Context, string) error
+	RestoreDeleted(context.Context, string) error
+	StorageUsageBytes(context.Context) (int64, error)
+	ClaimForProcessing(context.Context, string, string, bool) (bool, error)
+}
+
 // ResilientAvatarRepository защищает PostgreSQL-операции аватаров общим circuit breaker процесса.
 type ResilientAvatarRepository struct {
-	base    *AvatarRepository
+	base    avatarRepository
 	breaker *resilience.CircuitBreaker
 }
+
+var _ avatarRepository = (*AvatarRepository)(nil)
 
 // NewResilientAvatarRepository добавляет circuit breaker к PostgreSQL-репозиторию.
 func NewResilientAvatarRepository(base *AvatarRepository, lg *slog.Logger) *ResilientAvatarRepository {

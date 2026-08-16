@@ -12,7 +12,9 @@ data:
   RABBITMQ_EXCHANGE: {{ .Values.config.rabbitmq.exchange | quote }}
   RABBITMQ_QUEUE: {{ .Values.config.rabbitmq.queue | quote }}
   TRACING_ENABLED: {{ .Values.config.tracing.enabled | quote }}
-  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.tracing.otlpEndpoint | quote }}
+{{ if .Values.config.tracing.enabled }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ required "config.tracing.otlpEndpoint is required when tracing is enabled" .Values.config.tracing.otlpEndpoint | quote }}
+{{ end }}
   HTTP_ADDRESS: {{ .Values.config.httpAddress | quote }}
   MAX_UPLOAD_SIZE: {{ .Values.config.maxUploadSize | quote }}
   WORKER_METRICS_ADDRESS: {{ .Values.config.workerMetricsAddress | quote }}

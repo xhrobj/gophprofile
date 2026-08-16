@@ -8,11 +8,20 @@ import (
 	"github.com/xhrobj/gophprofile/internal/resilience"
 )
 
+type storage interface {
+	Put(context.Context, string, io.Reader, int64, string) error
+	Get(context.Context, string) (io.ReadCloser, error)
+	Delete(context.Context, ...string) error
+	Ping(context.Context) error
+}
+
 // ResilientStorage защищает runtime S3-операции общим circuit breaker процесса.
 type ResilientStorage struct {
-	base    *Storage
+	base    storage
 	breaker *resilience.CircuitBreaker
 }
+
+var _ storage = (*Storage)(nil)
 
 // NewResilientStorage добавляет circuit breaker к S3 storage.
 func NewResilientStorage(base *Storage, lg *slog.Logger) *ResilientStorage {

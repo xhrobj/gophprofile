@@ -10,7 +10,7 @@ import (
 	"github.com/xhrobj/gophprofile/internal/broker"
 )
 
-func TestConsumerPing(t *testing.T) {
+func TestConsumer_Ping(t *testing.T) {
 	t.Run("canceled context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()

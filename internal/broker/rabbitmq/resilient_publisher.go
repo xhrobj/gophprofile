@@ -8,11 +8,20 @@ import (
 	"github.com/xhrobj/gophprofile/internal/resilience"
 )
 
+type publisher interface {
+	PublishAvatarUploaded(context.Context, model.Avatar) error
+	PublishAvatarDeleted(context.Context, model.Avatar) error
+	Ping(context.Context) error
+	Close() error
+}
+
 // ResilientPublisher защищает runtime publish-операции общим RabbitMQ circuit breaker процесса.
 type ResilientPublisher struct {
-	base    *Publisher
+	base    publisher
 	breaker *resilience.CircuitBreaker
 }
+
+var _ publisher = (*Publisher)(nil)
 
 // NewResilientPublisher добавляет circuit breaker к RabbitMQ publisher.
 func NewResilientPublisher(base *Publisher, lg *slog.Logger) *ResilientPublisher {

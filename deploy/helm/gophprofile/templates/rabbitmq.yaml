@@ -49,6 +49,7 @@ spec:
       labels:
         {{- include "gophprofile.selectorLabels" (list . "rabbitmq") | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: rabbitmq
           image: "{{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}"

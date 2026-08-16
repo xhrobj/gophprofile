@@ -58,26 +58,7 @@ func TestHealthHandler(t *testing.T) {
 
 			router.ServeHTTP(response, request)
 
-			if response.Code != tt.wantStatus {
-				t.Fatalf("response status = %d, want %d", response.Code, tt.wantStatus)
-			}
-			if got := response.Header().Get("Content-Type"); got != "application/json" {
-				t.Errorf("Content-Type = %q, want application/json", got)
-			}
-
-			if strings.Contains(response.Body.String(), "connection refused") {
-				t.Error("response leaks raw dependency error")
-			}
-
-			var body health.Report
-			decodeJSONResponse(t, response, &body)
-			wantBody := tt.report
-			wantBody.Components.Database.Error = ""
-			wantBody.Components.S3.Error = ""
-			wantBody.Components.Broker.Error = ""
-			if body != wantBody {
-				t.Errorf("response body = %+v, want %+v", body, wantBody)
-			}
+			assertHealthResponse(t, response, tt.wantStatus, tt.report)
 			if checker.calls != 1 {
 				t.Errorf("Check() calls = %d, want 1", checker.calls)
 			}
@@ -92,4 +73,32 @@ func (f *fakeHealthChecker) Check(context.Context) health.Report {
 
 func (noopHealthChecker) Check(context.Context) health.Report {
 	return health.Report{Status: "ok"}
+}
+
+func assertHealthResponse(
+	t *testing.T,
+	response *httptest.ResponseRecorder,
+	wantStatus int,
+	wantBody health.Report,
+) {
+	t.Helper()
+
+	if response.Code != wantStatus {
+		t.Fatalf("response status = %d, want %d", response.Code, wantStatus)
+	}
+	if got := response.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", got)
+	}
+	if strings.Contains(response.Body.String(), "connection refused") {
+		t.Error("response leaks raw dependency error")
+	}
+
+	var body health.Report
+	decodeJSONResponse(t, response, &body)
+	wantBody.Components.Database.Error = ""
+	wantBody.Components.S3.Error = ""
+	wantBody.Components.Broker.Error = ""
+	if body != wantBody {
+		t.Errorf("response body = %+v, want %+v", body, wantBody)
+	}
 }

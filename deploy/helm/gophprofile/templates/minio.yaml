@@ -35,6 +35,7 @@ spec:
       labels:
         {{- include "gophprofile.selectorLabels" (list . "minio") | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: minio
           image: "{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"

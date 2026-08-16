@@ -10,7 +10,7 @@ import (
 
 const publisherReconnectCancellationWait = time.Second
 
-func TestPublisherPing_CancelsReconnectHandshake(t *testing.T) {
+func TestPublisher_Ping_CancelsReconnectHandshake(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen fake RabbitMQ: %v", err)
@@ -73,7 +73,6 @@ func TestContextMutex_LockContextStopsOnCancellation(t *testing.T) {
 		result <- mutex.LockContext(ctx)
 	}()
 
-	time.Sleep(20 * time.Millisecond)
 	cancel()
 
 	select {
@@ -107,7 +106,6 @@ func TestInterruptRabbitMQSetup_CancelsAfterConnectionHandshake(t *testing.T) {
 		readResult <- readErr
 	}()
 
-	time.Sleep(20 * time.Millisecond)
 	cancel()
 
 	select {

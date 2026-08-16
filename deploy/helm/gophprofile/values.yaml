@@ -2,15 +2,17 @@ server:
   replicas: 2
   image:
     repository: gophprofile-server
-    tag: latest
+    tag: "0.1.0"
     pullPolicy: IfNotPresent
   resources:
     requests:
       memory: 128Mi
       cpu: 100m
+      ephemeral-storage: 64Mi
     limits:
       memory: 512Mi
       cpu: 500m
+      ephemeral-storage: 256Mi
   livenessProbe:
     initialDelaySeconds: 30
     periodSeconds: 10
@@ -33,15 +35,17 @@ worker:
   replicas: 1
   image:
     repository: gophprofile-worker
-    tag: latest
+    tag: "0.1.0"
     pullPolicy: IfNotPresent
   resources:
     requests:
       memory: 128Mi
       cpu: 100m
+      ephemeral-storage: 64Mi
     limits:
       memory: 512Mi
       cpu: 500m
+      ephemeral-storage: 256Mi
   livenessProbe:
     initialDelaySeconds: 30
     periodSeconds: 10
@@ -66,7 +70,8 @@ config:
     queue: avatars.processing
   tracing:
     enabled: false
-    otlpEndpoint: http://jaeger:4318
+    # Задаётся явно при включении tracing; production endpoint должен использовать TLS.
+    otlpEndpoint: ""
   httpAddress: ":8080"
   maxUploadSize: "10485760"
   workerMetricsAddress: ":9092"
@@ -116,9 +121,11 @@ postgres:
     requests:
       memory: 64Mi
       cpu: 50m
+      ephemeral-storage: 64Mi
     limits:
       memory: 256Mi
       cpu: 250m
+      ephemeral-storage: 512Mi
 
 minio:
   image:
@@ -140,9 +147,11 @@ minio:
     requests:
       memory: 128Mi
       cpu: 50m
+      ephemeral-storage: 64Mi
     limits:
       memory: 256Mi
       cpu: 250m
+      ephemeral-storage: 512Mi
 
 rabbitmq:
   image:
@@ -165,40 +174,48 @@ rabbitmq:
     requests:
       memory: 128Mi
       cpu: 100m
+      ephemeral-storage: 64Mi
     limits:
       memory: 384Mi
       cpu: 500m
+      ephemeral-storage: 512Mi
 
 migration:
   enabled: true
   image:
     repository: gophprofile-migrate
-    tag: latest
+    tag: "0.1.0"
     pullPolicy: IfNotPresent
   backoffLimit: 6
   resources:
     requests:
       memory: 64Mi
       cpu: 50m
+      ephemeral-storage: 32Mi
     limits:
       memory: 128Mi
       cpu: 250m
+      ephemeral-storage: 128Mi
   waitForPostgres:
     resources:
       requests:
         memory: 16Mi
         cpu: 10m
+        ephemeral-storage: 16Mi
       limits:
         memory: 32Mi
         cpu: 50m
+        ephemeral-storage: 64Mi
   waitForSchema:
     resources:
       requests:
         memory: 16Mi
         cpu: 10m
+        ephemeral-storage: 16Mi
       limits:
         memory: 32Mi
         cpu: 50m
+        ephemeral-storage: 64Mi
 
 networkPolicy:
   enabled: true

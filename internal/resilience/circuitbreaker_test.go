@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestCircuitBreakerOpenFailFastAndRecover(t *testing.T) {
+func TestCircuitBreaker_OpenFailFastAndRecover(t *testing.T) {
 	const threshold = 3
 
 	breaker := newCircuitBreaker("postgresql", discardLogger(), breakerConfig{
@@ -75,7 +75,7 @@ func TestCircuitBreakerOpenFailFastAndRecover(t *testing.T) {
 	}
 }
 
-func TestCircuitBreakerExcludesCancellationAndBusinessErrors(t *testing.T) {
+func TestCircuitBreaker_ExcludesCancellationAndBusinessErrors(t *testing.T) {
 	businessErr := errors.New("business outcome")
 	breaker := newCircuitBreaker("postgresql", discardLogger(), breakerConfig{
 		failureThreshold: 1,
