@@ -50,7 +50,7 @@ worker:
   readinessProbe:
     initialDelaySeconds: 5
     periodSeconds: 10
-    timeoutSeconds: 2
+    timeoutSeconds: 4
     failureThreshold: 3
 
 pod:
@@ -74,6 +74,9 @@ config:
   logLevel: info
 
 secrets:
+  # Для ротации DATABASE_DSN используйте внешний Secret (create=false) и обновляйте его до helm upgrade.
+  # При create=true изменение databaseDsn во время upgrade с включёнными миграциями намеренно запрещено:
+  # pre-upgrade migration hook выполняется раньше обновления обычного managed Secret.
   create: false
   name: gophprofile-secrets
   databaseDsn: ""

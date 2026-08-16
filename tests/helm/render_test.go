@@ -38,9 +38,8 @@ func TestRenderContracts(t *testing.T) {
 	assertContains(t, workerDeployment, "checksum/secret:")
 	assertContains(t, workerDeployment, "name: wait-for-migrations")
 	assertContains(t, workerDeployment, "schema_migrations")
-	if got := strings.Count(workerDeployment, "path: /health"); got != 2 {
-		t.Fatalf("worker Deployment must keep both /health probes, got %d", got)
-	}
+	assertContains(t, workerDeployment, "path: /live")
+	assertContains(t, workerDeployment, "path: /health")
 
 	assertContains(t, serverMonitor, "port: http")
 	assertContains(t, serverMonitor, "path: /metrics")

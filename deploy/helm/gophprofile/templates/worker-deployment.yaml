@@ -53,7 +53,7 @@ spec:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           livenessProbe:
             httpGet:
-              path: /health
+              path: /live
               port: metrics
             {{- toYaml .Values.worker.livenessProbe | nindent 12 }}
           readinessProbe:

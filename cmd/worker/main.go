@@ -15,6 +15,7 @@ import (
 
 	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 	"github.com/xhrobj/gophprofile/internal/config"
+	"github.com/xhrobj/gophprofile/internal/health"
 	"github.com/xhrobj/gophprofile/internal/imageprocessor"
 	"github.com/xhrobj/gophprofile/internal/logger"
 	"github.com/xhrobj/gophprofile/internal/observability"
@@ -102,10 +103,10 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("listen for Worker metrics on %s: %w", cfg.MetricsAddress, err)
 	}
 
+	healthChecker := health.NewChecker(pool, storage, consumer)
 	metricsMux := http.NewServeMux()
-	metricsMux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	metricsMux.Handle("/live", health.NewLivenessHandler())
+	metricsMux.Handle("/health", health.NewReadinessHandler(healthChecker))
 	metricsMux.Handle("/metrics", metrics.Handler())
 	metricsServer := &http.Server{
 		Addr:              cfg.MetricsAddress,
