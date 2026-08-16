@@ -106,6 +106,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
@@ -165,6 +167,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/users/{user_id}/avatar:
@@ -208,6 +212,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
@@ -255,8 +261,19 @@ paths:
                 total: 1
         '400':
           $ref: '#/components/responses/BadRequest'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /live:
+    get:
+      tags:
+        - Health
+      operationId: getLiveness
+      summary: Проверить работоспособность процесса
+      responses:
+        '200':
+          description: Процесс запущен и HTTP-сервер отвечает.
   /health:
     get:
       tags:
@@ -292,7 +309,6 @@ paths:
                     status: ok
                   s3:
                     status: error
-                    error: connection refused
                   broker:
                     status: ok
 components:
@@ -381,7 +397,7 @@ components:
             max_size: 10485760
             request_id: faceb00cf00dfeeddeadbeefc0decafe
     ServiceUnavailable:
-      description: Сервис временно не может завершить операцию из-за недоступности брокера сообщений.
+      description: Сервис временно не может завершить операцию из-за недоступности внешней зависимости.
       content:
         application/json:
           schema:
@@ -576,5 +592,3 @@ components:
           enum:
             - ok
             - error
-        error:
-          type: string
