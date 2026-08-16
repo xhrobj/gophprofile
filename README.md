@@ -225,6 +225,89 @@ Prometheus отправляет сработавшие алерты в Alertmana
 
 Kubernetes deployment GophProfile упакован в Helm Chart `deploy/helm/gophprofile`. Chart разворачивает Server, Worker, PostgreSQL, MinIO, RabbitMQ, migration Job, HPA, Traefik Ingress, NetworkPolicy, ServiceMonitor и PrometheusRule. `kube-prometheus-stack` остаётся инфраструктурой кластера и устанавливается отдельно.
 
+### Архитектура Kubernetes
+
+```mermaid
+flowchart TB
+    client["Browser / API client"]
+
+    subgraph system["kube-system"]
+        traefik["Traefik"]
+        metricsServer["Metrics Server"]
+    end
+
+    subgraph app["namespace: gophprofile · NetworkPolicy: default-deny + explicit allow rules"]
+        ingress["Ingress: server<br/>rate-limit + upload-limit"]
+
+        serverSvc["Service: server<br/>ClusterIP :80"]
+        server["Deployment: server"]
+        hpa["HPA: server<br/>min 2 · max 10<br/>CPU 70% · memory 80%"]
+
+        workerSvc["Service: worker-metrics<br/>ClusterIP :9092"]
+        worker["Deployment: worker<br/>1 replica"]
+
+        migrate["Job: migrate<br/>post-install / pre-upgrade"]
+
+        postgresSvc["Service: postgres<br/>headless · :5432"]
+        postgres["StatefulSet: postgres<br/>1 replica · PVC"]
+
+        minioSvc["Service: minio<br/>headless · :9000"]
+        minio["StatefulSet: minio<br/>1 replica · PVC"]
+
+        rabbitSvc["Service: rabbitmq<br/>headless · :5672 / :15692"]
+        rabbit["StatefulSet: rabbitmq<br/>1 replica · PVC"]
+
+        smServer["ServiceMonitor<br/>server"]
+        smWorker["ServiceMonitor<br/>worker"]
+        smRabbit["ServiceMonitor<br/>rabbitmq"]
+        rules["PrometheusRule<br/>gophprofile-alerts"]
+
+        ingress --> serverSvc --> server
+        hpa -. scales .-> server
+
+        server --> postgresSvc --> postgres
+        server --> minioSvc --> minio
+        server --> rabbitSvc --> rabbit
+
+        worker --> postgresSvc
+        worker --> minioSvc
+        worker --> rabbitSvc
+        rabbit -. deliveries .-> worker
+
+        migrate --> postgresSvc
+
+        workerSvc --> worker
+
+        smServer -. selects .-> serverSvc
+        smWorker -. selects .-> workerSvc
+        smRabbit -. selects .-> rabbitSvc
+    end
+
+    subgraph monitoring["namespace: monitoring · kube-prometheus-stack"]
+        prometheus["Prometheus"]
+        alertmanager["Alertmanager"]
+        grafana["Grafana"]
+    end
+
+    client --> traefik --> ingress
+
+    metricsServer -. resource metrics .-> hpa
+
+    prometheus -. discovers via .-> smServer
+    prometheus -. discovers via .-> smWorker
+    prometheus -. discovers via .-> smRabbit
+    prometheus -. loads .-> rules
+
+    prometheus -. scrapes .-> serverSvc
+    prometheus -. scrapes .-> workerSvc
+    prometheus -. scrapes .-> rabbitSvc
+
+    prometheus --> alertmanager
+    grafana --> prometheus
+```
+
+Публичный трафик входит в namespace только через Traefik и Service `server`. `default-deny` по умолчанию ограничивает ingress/egress, а отдельные NetworkPolicy разрешают Server и Worker обращаться к PostgreSQL, MinIO, RabbitMQ и DNS; migration Job — к PostgreSQL. Prometheus получает метрики application workloads через ServiceMonitor, а Grafana использует Prometheus как источник данных. StatefulSet PostgreSQL, MinIO и RabbitMQ используют persistent volumes.
+
 Для локального Rancher Desktop сначала подготовьте Secret-файлы из `.example` и заполните их локальными значениями:
 
 ```bash
