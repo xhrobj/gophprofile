@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   go-ci:
-    name: Quality checks -> lint, build, vet, test, coverage and Sonar
+    name: Quality checks -> lint, build, vet, test, Helm, coverage and Sonar
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -25,6 +25,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Setup Helm
+        uses: Azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.21.3
+
       - name: (^_^) Run golangci-lint
         uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         with:
@@ -35,6 +40,9 @@ jobs:
 
       - name: (^_^) Vet
         run: make vet
+
+      - name: (^_^) Run Helm checks
+        run: make helm-check
 
       - name: (^_^) Run tests --race
         run: make test-race
