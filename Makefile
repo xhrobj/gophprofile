@@ -57,6 +57,8 @@ K8S_MONITORING_NAMESPACE ?= monitoring
 K8S_MONITORING_RELEASE ?= monitoring
 K8S_MONITORING_CHART_VERSION ?= 88.3.0
 K8S_MONITORING_VALUES ?= deploy/k8s/monitoring/values.yml
+K8S_MONITORING_DASHBOARD ?= deploy/k8s/monitoring/dashboards/kubernetes-overview.json
+K8S_MONITORING_DASHBOARD_CONFIGMAP ?= gophprofile-kubernetes-overview
 
 # обновить профиль покрытия и вывести общий процент
 show-coverage: coverage
@@ -114,9 +116,19 @@ k8s-monitoring-up:
 		--values $(K8S_MONITORING_VALUES) \
 		--wait \
 		--timeout 10m
+	kubectl create configmap $(K8S_MONITORING_DASHBOARD_CONFIGMAP) \
+		--namespace $(K8S_MONITORING_NAMESPACE) \
+		--from-file=kubernetes-overview.json=$(K8S_MONITORING_DASHBOARD) \
+		--dry-run=client -o yaml | kubectl apply -f -
+	kubectl label configmap $(K8S_MONITORING_DASHBOARD_CONFIGMAP) \
+		--namespace $(K8S_MONITORING_NAMESPACE) \
+		grafana_dashboard=1 --overwrite
 
 # удалить Kubernetes monitoring stack
 k8s-monitoring-down:
+	kubectl delete configmap $(K8S_MONITORING_DASHBOARD_CONFIGMAP) \
+		--namespace $(K8S_MONITORING_NAMESPACE) \
+		--ignore-not-found
 	helm uninstall $(K8S_MONITORING_RELEASE) --namespace $(K8S_MONITORING_NAMESPACE)
 
 # создать (при необходимости) и запустить локальный PostgreSQL и дождаться его готовности

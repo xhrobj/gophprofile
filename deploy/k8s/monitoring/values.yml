@@ -23,6 +23,11 @@ grafana:
       cpu: 500m
       memory: 512Mi
   sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
     datasources:
       uid: prometheus
 
