@@ -74,7 +74,7 @@ func cleanupReconnectTopology(t *testing.T, publisher *Publisher, exchange, queu
 	publisher.mu.Lock()
 	defer publisher.mu.Unlock()
 
-	if err := publisher.ensureConnectedLocked(); err != nil {
+	if err := publisher.ensureConnectedLocked(context.Background()); err != nil {
 		t.Errorf("reconnect RabbitMQ for topology cleanup: %v", err)
 		return
 	}
