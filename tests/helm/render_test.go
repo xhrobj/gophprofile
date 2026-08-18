@@ -49,8 +49,10 @@ func TestRenderContracts(t *testing.T) {
 	assertContains(t, workerMonitor, "port: metrics")
 	assertContains(t, workerMonitor, "path: /metrics")
 	assertNotContains(t, ingress, "path: /metrics")
-	assertContains(t, migrateJob, `"helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded`)
+	assertNotContains(t, migrateJob, "helm.sh/hook")
 	assertContains(t, migrateJob, "secretKeyRef:")
+	assertContains(t, serverDeployment, "version = 1 AND dirty = false")
+	assertContains(t, workerDeployment, "version = 1 AND dirty = false")
 
 	for name, workload := range map[string]string{
 		"server":   serverDeployment,
@@ -77,6 +79,38 @@ func TestRenderContracts(t *testing.T) {
 
 	if strings.Contains(rendered, "kind: Secret") {
 		t.Fatal("default values must not render Kubernetes Secret resources")
+	}
+}
+
+func TestUpgradeMigrationUsesPreUpgradeHook(t *testing.T) {
+	chartPath := filepath.Join("..", "..", "deploy", "helm", "gophprofile")
+
+	output, err := renderChart(chartPath, "--is-upgrade")
+	if err != nil {
+		t.Fatalf("helm template --is-upgrade: %v\n%s", err, output)
+	}
+
+	migrateJob := findDocument(t, string(output), "Job", "migrate-upgrade")
+	assertContains(t, migrateJob, `"helm.sh/hook": pre-upgrade`)
+	assertContains(t, migrateJob, `"helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded`)
+}
+
+func TestTracingAddsOTLPEgress(t *testing.T) {
+	chartPath := filepath.Join("..", "..", "deploy", "helm", "gophprofile")
+
+	output, err := renderChart(
+		chartPath,
+		"--set", "config.tracing.enabled=true",
+		"--set", "config.tracing.otlpEndpoint=https://otel.example.com:4318",
+	)
+	if err != nil {
+		t.Fatalf("helm template with tracing: %v\n%s", err, output)
+	}
+
+	rendered := string(output)
+	for _, name := range []string{"server", "worker"} {
+		networkPolicy := findDocument(t, rendered, "NetworkPolicy", name)
+		assertContains(t, networkPolicy, "port: 4318")
 	}
 }
 

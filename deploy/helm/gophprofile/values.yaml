@@ -182,6 +182,8 @@ rabbitmq:
 
 migration:
   enabled: true
+  # Обновляйте вместе с добавлением нового файла migrations/NNN_*.up.sql.
+  targetVersion: 1
   image:
     repository: gophprofile-migrate
     tag: "0.1.0"
@@ -225,6 +227,11 @@ networkPolicy:
   prometheusPodName: prometheus
   prometheusInstance: monitoring-kube-prometheus-prometheus
   dnsPodLabel: kube-dns
+  # Дополнительное ограничение назначения OTLP egress. Пустой список разрешает
+  # tracing на порт endpoint в любое назначение; для in-cluster collector можно
+  # задать podSelector/namespaceSelector, для внешнего endpoint - ipBlock.
+  tracingEgress:
+    to: []
 
 monitoring:
   enabled: true

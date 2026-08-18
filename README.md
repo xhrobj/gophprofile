@@ -467,17 +467,19 @@ kubectl apply -n gophprofile \
 helm upgrade --install gophprofile deploy/helm/gophprofile \
   --namespace gophprofile \
   -f deploy/helm/gophprofile/values-local.yaml \
+  --wait \
+  --wait-for-jobs \
   --timeout 5m
 
 kubectl rollout status deployment/server -n gophprofile --timeout=120s
 kubectl rollout status deployment/worker -n gophprofile --timeout=120s
 ```
 
-При первой установке migration Job запускается как `post-install` hook и ждёт доступности PostgreSQL; init containers Server и Worker не пропускают workloads дальше старта, пока `schema_migrations` не зафиксирует успешно завершённую миграцию. При upgrade тот же Job выполняется как `pre-upgrade` hook до обновления workloads.
+При первой установке migration Job является обычным ресурсом release: он создается одновременно с PostgreSQL, ждёт доступности БД и применяет миграции. Init containers Server и Worker пропускают workloads только после появления версии `schema_migrations`, соответствующей `migration.targetVersion`, с `dirty=false`, поэтому `helm upgrade --install --wait` не образует цикл с `post-install` hook. При upgrade миграции выполняются отдельным `pre-upgrade` hook `migrate-upgrade` до обновления workloads.
 
-Поэтому для первой установки Helm не запускается с `--wait`: иначе ожидание Ready application Pods происходило бы раньше `post-install` hook.
+Если tracing включен, NetworkPolicy Server и Worker автоматически разрешает TCP egress на порт из `config.tracing.otlpEndpoint`. При необходимости назначение этого правила дополнительно ограничивается через `networkPolicy.tracingEgress.to` (`podSelector` / `namespaceSelector` для in-cluster collector или `ipBlock` для внешнего endpoint).
 
-Статус release можно посмотреть командой `helm status gophprofile -n gophprofile`, удалить release — `helm uninstall gophprofile -n gophprofile`. Успешный migration hook удаляется Helm автоматически; при ошибке Job остаётся для диагностики. Локальные Secrets и persistent PVC в lifecycle Helm release не входят и после uninstall сохраняются.
+Статус release можно посмотреть командой `helm status gophprofile -n gophprofile`, удалить release — `helm uninstall gophprofile -n gophprofile`. Install Job управляется release как обычный ресурс; успешный `pre-upgrade` migration hook удаляется Helm автоматически, а failed hook остаётся для диагностики. Локальные Secrets и persistent PVC в lifecycle Helm release не входят и после uninstall сохраняются.
 
 ### Проверка
 

@@ -28,7 +28,7 @@ app.kubernetes.io/managed-by: {{ (index . 0).Release.Service }}
     - -c
     - |
       until psql "$DATABASE_DSN" -v ON_ERROR_STOP=1 -tAc \
-        "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE dirty = false);" \
+        "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = {{ .Values.migration.targetVersion }} AND dirty = false);" \
         2>/dev/null | grep -q t; do
         sleep 1
       done
@@ -46,5 +46,31 @@ app.kubernetes.io/managed-by: {{ (index . 0).Release.Service }}
         - ALL
   resources:
     {{- toYaml .Values.migration.waitForSchema.resources | nindent 4 }}
+{{- end }}
+{{- end }}
+
+{{- define "gophprofile.tracingEgressPort" -}}
+{{- $endpoint := required "config.tracing.otlpEndpoint is required when tracing is enabled" .Values.config.tracing.otlpEndpoint -}}
+{{- $parsed := urlParse $endpoint -}}
+{{- $host := get $parsed "host" -}}
+{{- $portWithColon := regexFind ":[0-9]+$" $host -}}
+{{- if $portWithColon -}}
+{{- trimPrefix ":" $portWithColon -}}
+{{- else if eq (get $parsed "scheme") "https" -}}
+443
+{{- else if eq (get $parsed "scheme") "http" -}}
+80
+{{- else -}}
+{{- fail "config.tracing.otlpEndpoint must use http or https" -}}
+{{- end -}}
+{{- end }}
+
+{{- define "gophprofile.tracingEgressRule" -}}
+- ports:
+    - protocol: TCP
+      port: {{ include "gophprofile.tracingEgressPort" . }}
+{{- with .Values.networkPolicy.tracingEgress.to }}
+  to:
+{{ toYaml . | nindent 4 }}
 {{- end }}
 {{- end }}
