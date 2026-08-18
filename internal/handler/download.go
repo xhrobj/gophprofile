@@ -62,6 +62,12 @@ func (h *downloadHandler) serve(w http.ResponseWriter, r *http.Request, input se
 			writeError(w, r, http.StatusBadRequest, "invalid_size", "supported sizes: original, 100x100, 300x300", 0)
 		case errors.Is(err, model.ErrAvatarNotFound):
 			writeError(w, r, http.StatusNotFound, "avatar_not_found", "avatar not found", 0)
+		case errors.Is(err, service.ErrServiceUnavailable):
+			logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).ErrorContext(r.Context(),
+				"avatar download dependency unavailable",
+				slog.Any("error", err),
+			)
+			writeError(w, r, http.StatusServiceUnavailable, "service_unavailable", "service temporarily unavailable", 0)
 		default:
 			logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).ErrorContext(r.Context(),
 				"failed to download avatar",

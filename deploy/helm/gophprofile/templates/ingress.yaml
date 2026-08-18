@@ -1,0 +1,63 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: upload-limit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "server") | nindent 4 }}
+spec:
+  buffering:
+    maxRequestBodyBytes: {{ .Values.ingress.uploadLimit.maxRequestBodyBytes | int64 }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: rate-limit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "server") | nindent 4 }}
+spec:
+  rateLimit:
+    average: {{ .Values.ingress.rateLimit.average }}
+    period: {{ .Values.ingress.rateLimit.period }}
+    burst: {{ .Values.ingress.rateLimit.burst }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "server") | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: {{ .Values.ingress.entryPoints | quote }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-rate-limit@kubernetescrd,%s-upload-limit@kubernetescrd" .Release.Namespace .Release.Namespace | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: server
+                port:
+                  name: http
+          - path: /web
+            pathType: Prefix
+            backend:
+              service:
+                name: server
+                port:
+                  name: http
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: server
+                port:
+                  name: http
+{{- end }}

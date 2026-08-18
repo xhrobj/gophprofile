@@ -121,7 +121,7 @@ func TestTracing_DropsTelemetryNoise(t *testing.T) {
 	tracing := installTracing(res, exporter)
 	tracer := otel.Tracer("test")
 
-	for _, path := range []string{"/health", "/metrics"} {
+	for _, path := range []string{"/live", "/health", "/metrics"} {
 		noiseCtx, noiseSpan := tracer.Start(
 			context.Background(),
 			"GET",

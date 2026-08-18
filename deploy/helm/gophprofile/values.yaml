@@ -1,0 +1,242 @@
+server:
+  replicas: 2
+  image:
+    repository: gophprofile-server
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      cpu: 500m
+      ephemeral-storage: 256Mi
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 4
+    failureThreshold: 3
+  terminationDrainSeconds: 5
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    cpuAverageUtilization: 70
+    memoryAverageUtilization: 80
+
+worker:
+  replicas: 1
+  image:
+    repository: gophprofile-worker
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      cpu: 500m
+      ephemeral-storage: 256Mi
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 4
+    failureThreshold: 3
+
+pod:
+  terminationGracePeriodSeconds: 30
+
+config:
+  s3:
+    endpoint: minio:9000
+    bucket: avatars
+    useSSL: false
+  rabbitmq:
+    exchange: avatars.exchange
+    queue: avatars.processing
+  tracing:
+    enabled: false
+    # Задаётся явно при включении tracing; production endpoint должен использовать TLS.
+    otlpEndpoint: ""
+  httpAddress: ":8080"
+  maxUploadSize: "10485760"
+  workerMetricsAddress: ":9092"
+  shutdownTimeout: 10s
+  logLevel: info
+
+secrets:
+  # Для ротации DATABASE_DSN используйте внешний Secret (create=false) и обновляйте его до helm upgrade.
+  # При create=true изменение databaseDsn во время upgrade с включёнными миграциями намеренно запрещено:
+  # pre-upgrade migration hook выполняется раньше обновления обычного managed Secret.
+  create: false
+  name: gophprofile-secrets
+  databaseDsn: ""
+  s3AccessKey: ""
+  s3SecretKey: ""
+  rabbitmqUrl: ""
+
+ingress:
+  enabled: true
+  className: traefik
+  host: gophprofile.local
+  entryPoints: web
+  uploadLimit:
+    maxRequestBodyBytes: "11534336"
+  rateLimit:
+    average: 20
+    period: 1s
+    burst: 40
+
+postgres:
+  image:
+    repository: postgres
+    tag: "17.10"
+    pullPolicy: IfNotPresent
+  database: gophprofile
+  user: gophprofile
+  auth:
+    create: false
+    secretName: postgres-secrets
+    password: ""
+  service:
+    port: 5432
+  persistence:
+    storageClassName: local-path
+    size: 1Gi
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 256Mi
+      cpu: 250m
+      ephemeral-storage: 512Mi
+
+minio:
+  image:
+    repository: quay.io/minio/minio
+    tag: RELEASE.2025-09-07T16-13-09Z
+    pullPolicy: IfNotPresent
+  auth:
+    create: false
+    secretName: minio-secrets
+    rootUser: ""
+    rootPassword: ""
+  service:
+    apiPort: 9000
+    consolePort: 9001
+  persistence:
+    storageClassName: local-path
+    size: 1Gi
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 50m
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 256Mi
+      cpu: 250m
+      ephemeral-storage: 512Mi
+
+rabbitmq:
+  image:
+    repository: rabbitmq
+    tag: 4.3.4-management
+    pullPolicy: IfNotPresent
+  auth:
+    create: false
+    secretName: rabbitmq-secrets
+    username: ""
+    password: ""
+  service:
+    amqpPort: 5672
+    managementPort: 15672
+    prometheusPort: 15692
+  persistence:
+    storageClassName: local-path
+    size: 1Gi
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 384Mi
+      cpu: 500m
+      ephemeral-storage: 512Mi
+
+migration:
+  enabled: true
+  # Обновляйте вместе с добавлением нового файла migrations/NNN_*.up.sql.
+  targetVersion: 1
+  image:
+    repository: gophprofile-migrate
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  backoffLimit: 6
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+      ephemeral-storage: 32Mi
+    limits:
+      memory: 128Mi
+      cpu: 250m
+      ephemeral-storage: 128Mi
+  waitForPostgres:
+    resources:
+      requests:
+        memory: 16Mi
+        cpu: 10m
+        ephemeral-storage: 16Mi
+      limits:
+        memory: 32Mi
+        cpu: 50m
+        ephemeral-storage: 64Mi
+  waitForSchema:
+    resources:
+      requests:
+        memory: 16Mi
+        cpu: 10m
+        ephemeral-storage: 16Mi
+      limits:
+        memory: 32Mi
+        cpu: 50m
+        ephemeral-storage: 64Mi
+
+networkPolicy:
+  enabled: true
+  systemNamespace: kube-system
+  monitoringNamespace: monitoring
+  traefikPodName: traefik
+  prometheusPodName: prometheus
+  prometheusInstance: monitoring-kube-prometheus-prometheus
+  dnsPodLabel: kube-dns
+  # Дополнительное ограничение назначения OTLP egress. Пустой список разрешает
+  # tracing на порт endpoint в любое назначение; для in-cluster collector можно
+  # задать podSelector/namespaceSelector, для внешнего endpoint - ipBlock.
+  tracingEgress:
+    to: []
+
+monitoring:
+  enabled: true
+  serviceMonitor:
+    interval: 15s
+    scrapeTimeout: 10s
+  alerts:
+    enabled: true

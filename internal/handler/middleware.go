@@ -83,12 +83,22 @@ func traceRouteMiddleware(next http.Handler) http.Handler {
 }
 
 func requestIDMiddleware(baseLogger *slog.Logger) func(http.Handler) http.Handler {
+	return requestIDMiddlewareWithGenerator(baseLogger, newRequestID)
+}
+
+func requestIDMiddlewareWithGenerator(
+	baseLogger *slog.Logger,
+	generate func() (string, error),
+) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestID, err := newRequestID()
+			requestID, err := generate()
 			if err != nil {
 				baseLogger.ErrorContext(r.Context(), "failed to generate request ID", slog.Any("error", err))
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				writeJSON(w, http.StatusInternalServerError, errorResponse{
+					Error:   "internal_error",
+					Details: "internal server error",
+				})
 
 				return
 			}
@@ -109,7 +119,7 @@ func httpMetricsMiddleware(metrics HTTPMetrics) func(http.Handler) http.Handler 
 			next.ServeHTTP(writer, r)
 
 			routePattern := chi.RouteContext(r.Context()).RoutePattern()
-			if routePattern == "/health" || routePattern == "/metrics" {
+			if routePattern == "/live" || routePattern == "/health" || routePattern == "/metrics" {
 				return
 			}
 

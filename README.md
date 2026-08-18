@@ -1,99 +1,124 @@
 # 👤 [(^.^)] GophProfile
 
 [![(-_-) Go CI](https://github.com/xhrobj/gophprofile/actions/workflows/go-ci.yaml/badge.svg)](https://github.com/xhrobj/gophprofile/actions/workflows/go-ci.yaml)
-
 [![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=xhrobj_gophprofile&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=xhrobj_gophprofile)
-
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=xhrobj_gophprofile&metric=coverage)](https://sonarcloud.io/summary/new_code?id=xhrobj_gophprofile)
 
-GophProfile — сервис для загрузки, хранения, асинхронной обработки и выдачи пользовательских аватаров. Метаданные хранятся в PostgreSQL, оригиналы и миниатюры — в S3-совместимом MinIO, а Server и Worker обмениваются событиями через RabbitMQ.
+GophProfile — сервис для загрузки, хранения, асинхронной обработки и выдачи пользовательских аватаров. Проект реализовывался в три этапа: сначала MVP с REST API и фоновой обработкой, затем наблюдаемость, а на завершающем этапе — развертывание в Kubernetes через Helm.
 
-Требования к сервису описаны в [docs/SPECIFICATION.md](docs/SPECIFICATION.md), HTTP-контракт — в [api/openapi.yml](api/openapi.yml). Исходный README шаблона с планируемой структурой и командами сохранён в [`docs/README.template.md`](docs/README.template.md).
+> 📋 [Общее техническое задание проекта](docs/SPECIFICATION.md)
+
+## Спринт 11 — 🚀 MVP
+
+> 📋 [Техническое задание спринта 11](docs/specs/11-mvp.md)
+
+HTTP-контракт описан в [`api/openapi.yml`](api/openapi.yml)
+
+В первом этапе реализован основной пользовательский сценарий: Server принимает изображения через REST API и Web UI, хранит метаданные в PostgreSQL и оригиналы в S3-совместимом MinIO, а Worker асинхронно создаёт миниатюры после получения событий из RabbitMQ.
+
+### Архитектура
+
+```mermaid
+flowchart LR
+    client["Browser / API client"]
+
+    subgraph app["GophProfile"]
+        server["Server<br/>REST API + Web UI"]
+        rabbit["RabbitMQ<br/>direct exchange + queue + DLQ"]
+        worker["Worker<br/>asynchronous image processing"]
+        migrate["Migrate<br/>database schema"]
+    end
+
+    postgres[("PostgreSQL<br/>metadata + processing state")]
+    minio[("MinIO / S3<br/>originals + thumbnails")]
+
+    client -->|HTTP| server
+
+    server -->|create / read metadata<br/>soft delete| postgres
+    server -->|put / read originals<br/>read thumbnails| minio
+    server -->|avatar.uploaded<br/>avatar.deleted| rabbit
+
+    rabbit -->|deliveries| worker
+
+    worker -->|claim / update processing state| postgres
+    worker -->|read original<br/>write thumbnails / cleanup| minio
+
+    migrate -. schema migrations .-> postgres
+```
+
+Server публикует `avatar.uploaded` после успешного сохранения изображения. Worker получает событие, создаёт JPEG-миниатюры `100x100` и `300x300`, сохраняет их в MinIO и обновляет состояние обработки в PostgreSQL.
+
+Удаление также выполняется асинхронно: Server сразу скрывает запись через soft delete и публикует `avatar.deleted`, после чего Worker удаляет оригинал и миниатюры из объектного хранилища.
+
+Frontend встроен в бинарник Server через `go:embed`, поэтому отдельный web-контейнер не требуется.
+
+### Web UI
 
 <a href="docs/images/mvp/gophprofile-web-ui.jpg">
   <img src="docs/images/mvp/gophprofile-web-ui-preview.jpg" alt="GophProfile Web UI">
 </a>
 
-## Архитектура
+Server отдаёт встроенный интерфейс по маршрутам:
+
+- `/` — стартовая страница
+- `/web/upload` — загрузка аватара
+- `/web/gallery/{user_id}` — галерея пользователя
+
+Web UI использует тот же REST API и тот же origin, поэтому отдельная CORS-конфигурация для локального сценария не нужна.
+
+### REST API
+
+Все URL ниже относятся к Server на `http://localhost:8080`.
+
+| Метод | Endpoint | Назначение |
+| --- | --- | --- |
+| `POST` | `/api/v1/avatars` | загрузить аватар; обязательны `X-User-ID` и multipart-поле `file` |
+| `GET` | `/api/v1/avatars/{avatar_id}` | получить оригинал или миниатюру через `?size=original \| 100x100 \| 300x300` |
+| `GET` | `/api/v1/avatars/{avatar_id}/metadata` | получить метаданные и состояние обработки |
+| `DELETE` | `/api/v1/avatars/{avatar_id}` | удалить аватар владельца; обязателен `X-User-ID` |
+| `GET` | `/api/v1/users/{user_id}/avatar` | получить текущий аватар пользователя |
+| `DELETE` | `/api/v1/users/{user_id}/avatar` | удалить текущий аватар пользователя; обязателен `X-User-ID` |
+| `GET` | `/api/v1/users/{user_id}/avatars` | получить список аватаров пользователя |
+| `GET` | `/health` | проверить PostgreSQL, MinIO и RabbitMQ |
+
+Поддерживаются JPEG, PNG и WebP размером до 10 MiB. Миниатюры создаются асинхронно, поэтому сразу после `201 Created` их получение может временно возвращать `404`; готовность отражается в `processing_status` metadata.
+
+Ошибки, сформированные Server, возвращаются в едином JSON-формате с `error`, безопасным `details` и `request_id`:
+
+- `400 Bad Request` — некорректный запрос
+- `403 Forbidden` — попытка удалить чужой аватар
+- `404 Not Found` — ресурс не найден
+- `405 Method Not Allowed` — метод не поддерживается маршрутом
+- `413 Content Too Large` — превышен допустимый размер upload
+- `500 Internal Server Error` — неожиданная внутренняя ошибка
+- `503 Service Unavailable` — временно недоступны PostgreSQL, S3 или RabbitMQ
+
+Технические детали внутренних и dependency errors остаются в структурированных логах и не передаются клиенту.
+
+Пример загрузки:
+
+```bash
+curl -i \
+  -H 'X-User-ID: Bob' \
+  -F 'file=@avatar.png' \
+  http://localhost:8080/api/v1/avatars
+```
+
+### Хранение и обработка
+
+Канонические S3 keys:
 
 ```text
-Browser / API client
-        |
-        v
-+-------------------+
-|      Server       |
-|   REST + Web UI   |
-+-------------------+
-   |       |      |
-   |       |      +----------------+
-   |       v                       v
-   |   PostgreSQL              RabbitMQ
-   |   metadata                 events
-   |                               |
-   v                               v
- MinIO                        +--------+
- originals                    | Worker |
-                              +--------+
-                               |      |
-                               v      v
-                           PostgreSQL MinIO
-                           statuses   thumbnails
+originals/{user_id}/{avatar_id}/{file_name}
+thumbnails/{user_id}/{avatar_id}/100x100.jpg
+thumbnails/{user_id}/{avatar_id}/300x300.jpg
 ```
 
-Server принимает изображения, сохраняет метаданные в PostgreSQL и оригинал в MinIO, затем публикует `avatar.uploaded`. Worker получает событие, создаёт JPEG-миниатюры `100x100` и `300x300`, сохраняет их в MinIO и обновляет статус обработки. При удалении Server выполняет soft delete в PostgreSQL и публикует `avatar.deleted`, после чего Worker асинхронно удаляет оригинал и миниатюры из MinIO.
+RabbitMQ использует durable direct exchange и очередь с DLQ. Worker работает с manual ack, `prefetch=1`, bounded retry и идемпотентными переходами состояния; повторная доставка уже обработанного события не должна повторять побочные эффекты.
 
-Frontend встроен в бинарник Server через `go:embed`, поэтому отдельный web-контейнер не требуется.
+### Локальная разработка и тесты
 
-## 🚀 Быстрый запуск через Docker Compose
-
-Для полного локального запуска нужны Docker и Docker Compose.
-
-Создайте локальный env-файл:
-
-```bash
-cp .env.example .env
-```
-
-Соберите и запустите весь стек:
-
-```bash
-make compose-up
-```
-
-Эквивалентная команда без Make:
-
-```bash
-docker compose --env-file .env --profile observability up -d --build --wait
-```
-
-После запуска доступны:
-
-- Web UI и REST API: <http://localhost:8080>
-- healthcheck: <http://localhost:8080/health>
-- Server metrics: <http://localhost:8080/metrics>
-- Worker metrics: <http://localhost:9092/metrics>
-- Grafana: <http://localhost:3000>
-- Prometheus: <http://localhost:9090>
-- Alertmanager: <http://localhost:9093>
-- Jaeger: <http://localhost:16686>
-- MinIO Console: <http://localhost:9001>
-- RabbitMQ Management: <http://localhost:15672>
-
-Остановить контейнеры без удаления persistent volumes:
-
-```bash
-make compose-down
-```
-
-Удалить контейнеры вместе со всеми локальными данными полного Compose-стека:
-
-```bash
-make infra-erase
-```
-
-## Локальный запуск Go-процессов
-
-Для разработки без контейнеризации Server и Worker нужен Go 1.26. PostgreSQL, MinIO и RabbitMQ при этом по-прежнему можно запускать через Compose.
+Для запуска Go-процессов нужен Go 1.26. PostgreSQL, MinIO и RabbitMQ можно поднять через Docker Compose.
 
 В первом терминале:
 
@@ -109,41 +134,38 @@ make run-worker
 
 `make run-server` и `make run-worker` автоматически поднимают необходимую инфраструктуру и читают `.env`. Другой env-файл можно передать через `ENV_FILE`, например `make run-server ENV_FILE=.env.local`.
 
-## Переменные окружения
+Основные проверки:
 
-| Переменная | Назначение | Значение в `.env.example` |
-| --- | --- | --- |
-| `HTTP_ADDRESS` | адрес HTTP Server | `:8080` |
-| `MAX_UPLOAD_SIZE` | максимальный размер файла в байтах | `10485760` |
-| `SHUTDOWN_TIMEOUT` | timeout graceful shutdown Server | `10s` |
-| `POSTGRES_DB` | имя локальной PostgreSQL БД для Compose | `gophprofile` |
-| `POSTGRES_USER` | пользователь PostgreSQL | `gophprofile` |
-| `POSTGRES_PASSWORD` | пароль PostgreSQL | `password` |
-| `POSTGRES_PORT` | порт PostgreSQL на host | `5432` |
-| `S3_ENDPOINT` | MinIO/S3 endpoint для локальных Go-процессов | `localhost:9000` |
-| `S3_ACCESS_KEY` | S3 access key и MinIO root user | `minioadmin` |
-| `S3_SECRET_KEY` | S3 secret key и MinIO root password | `minioadmin` |
-| `S3_BUCKET` | bucket аватаров | `avatars` |
-| `S3_USE_SSL` | использовать TLS для S3 | `false` |
-| `RABBITMQ_USER` | пользователь RabbitMQ, создаваемый Compose | `gophprofile` |
-| `RABBITMQ_PASSWORD` | пароль RabbitMQ, создаваемый Compose | `password` |
-| `RABBITMQ_URL` | RabbitMQ URL для локальных Go-процессов | `amqp://gophprofile:password@localhost:5672/` |
-| `RABBITMQ_EXCHANGE` | direct exchange приложения | `avatars.exchange` |
-| `RABBITMQ_QUEUE` | очередь Worker | `avatars.processing` |
-| `TRACING_ENABLED` | включить экспорт distributed traces | `true` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | базовый OTLP/HTTP endpoint для traces | `http://localhost:4318` |
-| `WORKER_METRICS_ADDRESS` | адрес HTTP-сервера метрик Worker | `:9092` |
-| `LOG_LEVEL` | уровень логов: `debug`, `info`, `warn`, `error` | `info` |
+```bash
+make test
+make test-integration
+make ci
+```
 
-При запуске внутри Compose адреса зависимостей приложения переопределяются на внутренние DNS-имена `postgres`, `minio` и `rabbitmq`, а OTLP endpoint трассировки — на `jaeger:4318`.
+`make ci` выполняет build, тесты с race detector, integration-тесты, `go vet` и `golangci-lint`.
 
-## 👀 Наблюдаемость
+### Ограничения MVP
+
+- `X-User-ID` является идентификатором владельца для учебного MVP и не заменяет реальную аутентификацию или авторизацию.
+- Между PostgreSQL и RabbitMQ не используется transactional outbox: сбои публикации событий обрабатываются recovery-логикой, поэтому атомарной гарантии между изменением данных и публикацией сообщения нет. Операции с S3 также компенсируются на уровне приложения.
+- Миниатюры создаются в размерах `100x100` и `300x300` и всегда сохраняются как JPEG; динамическое преобразование формата не реализовано.
+
+## Спринт 12 — 👀 Observability
+
+> 📋 [Техническое задание спринта 12](docs/specs/12-observability.md)
+
+Во втором этапе к приложению добавлен полный observability-стек:
+
+- **Prometheus** и **Grafana** — сбор, хранение и визуализация метрик
+- **Loki** и **Alloy** — централизованный сбор и просмотр логов
+- **OpenTelemetry** и **Jaeger** — распределённая трассировка
+- **Prometheus Alerting** и **Alertmanager** — правила алертинга и уведомления
 
 GophProfile использует три взаимодополняющих сигнала:
 
 - **metrics** отвечают на вопрос «что происходит с сервисом?» — Prometheus собирает числовые ряды, а Grafana показывает их на дашбордах
 - **logs** помогают понять «что произошло в конкретный момент?» — JSON-логи Server и Worker собираются Alloy и хранятся в Loki
-- **traces** показывают «где именно прошел запрос и на каком участке возникла задержка или ошибка?» — Server и Worker отправляют OpenTelemetry traces по OTLP/HTTP напрямую в Jaeger
+- **traces** показывают «где именно прошёл запрос и на каком участке возникла задержка или ошибка?» — Server и Worker отправляют OpenTelemetry traces по OTLP/HTTP напрямую в Jaeger
 
 Для централизованного хранения логов выбран **Grafana Loki**: Alloy собирает JSON-логи контейнеров и отправляет их в Loki, а Grafana используется для поиска, корреляции и перехода из логов в трассировку.
 
@@ -159,7 +181,7 @@ GophProfile использует три взаимодополняющих си�
 - `gophprofile_postgres_pool_*` — состояние пула PostgreSQL
 - RabbitMQ экспортирует метрики очередей через собственный Prometheus endpoint
 
-В Grafana автоматически загружаются два дашборда: **GophProfile / Service Overview** — с HTTP RED и метриками процесса; **GophProfile / Business & Worker** — с метриками загрузок, Worker, хранилища, очередей RabbitMQ и пула PostgreSQL.
+В локальную Compose Grafana автоматически загружаются два прикладных дашборда: **GophProfile / Service Overview** — с HTTP RED и метриками процесса; **GophProfile / Business & Worker** — с метриками загрузок, Worker, хранилища, очередей RabbitMQ и пула PostgreSQL.
 
 <a href="docs/images/observability/grafana-service-overview.png">
   <img src="docs/images/observability/grafana-service-overview-preview.jpg" alt="Grafana Service Overview Dashboard">
@@ -221,98 +243,45 @@ Prometheus отправляет сработавшие алерты в Alertmana
   <img src="docs/images/observability/alertmanager-high-error-rate-preview.jpg" alt="Alertmanager HighErrorRate">
 </a>
 
-## Основные команды
+### Полный локальный запуск
 
-```text
-make build             собрать Server и Worker
-make run-server        поднять инфраструктуру, собрать и запустить Server локально
-make run-worker        поднять инфраструктуру, собрать и запустить Worker локально
-make infra-up          поднять PostgreSQL, MinIO и RabbitMQ
-make infra-down        остановить локальную инфраструктуру без удаления данных
-make infra-erase       удалить инфраструктуру и persistent volumes
-make compose-up        собрать и поднять полный стек Server + Worker + инфраструктура
-make compose-down      остановить полный стек без удаления данных
-make test              запустить обычные тесты
-make test-race         запустить обычные тесты с race detector
-make test-integration  запустить integration-тесты с реальной инфраструктурой
-make test-e2e          поднять полный Compose-стек и выполнить HTTP E2E happy path
-make coverage          построить coverage.out с integration-тестами
-make show-coverage     вывести итоговый процент покрытия
-make vet               запустить go vet
-make lint              запустить golangci-lint
-make ci                build + race + integration + vet + lint
-make clean             удалить локальные бинарники и coverage.out
-```
+Для полного локального запуска нужны Docker и Docker Compose.
 
-## REST API
-
-Все URL ниже относятся к Server на `http://localhost:8080`.
-
-| Метод | Endpoint | Назначение |
-| --- | --- | --- |
-| `POST` | `/api/v1/avatars` | загрузить аватар; обязательны `X-User-ID` и multipart-поле `file` |
-| `GET` | `/api/v1/avatars/{avatar_id}` | получить оригинал или миниатюру через `?size=original | 100x100 | 300x300` |
-| `GET` | `/api/v1/avatars/{avatar_id}/metadata` | получить метаданные и состояние обработки |
-| `DELETE` | `/api/v1/avatars/{avatar_id}` | удалить аватар владельца; обязателен `X-User-ID` |
-| `GET` | `/api/v1/users/{user_id}/avatar` | получить текущий аватар пользователя |
-| `DELETE` | `/api/v1/users/{user_id}/avatar` | удалить текущий аватар пользователя; обязателен `X-User-ID` |
-| `GET` | `/api/v1/users/{user_id}/avatars` | получить список аватаров пользователя |
-| `GET` | `/health` | проверить PostgreSQL, MinIO и RabbitMQ |
-
-Поддерживаются JPEG, PNG и WebP размером до 10 MiB. Миниатюры создаются асинхронно, поэтому сразу после `201 Created` их получение может временно возвращать `404`; готовность отражается в `processing_status` metadata.
-
-Пример загрузки:
+Создайте локальный env-файл:
 
 ```bash
-curl -i \
-  -H 'X-User-ID: Bob' \
-  -F 'file=@avatar.png' \
-  http://localhost:8080/api/v1/avatars
+cp .env.example .env
 ```
 
-Получение metadata:
+Соберите и запустите весь стек:
 
 ```bash
-curl http://localhost:8080/api/v1/avatars/<avatar_id>/metadata
+make compose-up
 ```
 
-Получение миниатюры:
+После запуска доступны:
+
+- Web UI и REST API: <http://localhost:8080>
+- healthcheck: <http://localhost:8080/health>
+- Server metrics: <http://localhost:8080/metrics>
+- Worker metrics: <http://localhost:9092/metrics>
+- Grafana: <http://localhost:3000>
+- Prometheus: <http://localhost:9090>
+- Alertmanager: <http://localhost:9093>
+- Jaeger: <http://localhost:16686>
+- MinIO Console: <http://localhost:9001>
+- RabbitMQ Management: <http://localhost:15672>
+
+Остановить контейнеры без удаления persistent volumes:
 
 ```bash
-curl -o avatar-100.jpg 'http://localhost:8080/api/v1/avatars/<avatar_id>?size=100x100'
+make compose-down
 ```
 
-Удаление:
+Удалить контейнеры вместе со всеми локальными данными полного Compose-стека:
 
 ```bash
-curl -i \
-  -X DELETE \
-  -H 'X-User-ID: Bob' \
-  http://localhost:8080/api/v1/avatars/<avatar_id>
-```
-
-## Web UI
-
-Server отдаёт встроенный интерфейс по маршрутам:
-
-- `/` — стартовая страница;
-- `/web/upload` — загрузка аватара;
-- `/web/gallery/{user_id}` — галерея пользователя.
-
-Web UI использует тот же REST API и тот же origin, поэтому отдельная CORS-конфигурация для локального сценария не нужна.
-
-## Тестирование
-
-Обычные unit-тесты не требуют внешней инфраструктуры:
-
-```bash
-make test
-```
-
-Integration-тесты работают с реальными PostgreSQL, MinIO и RabbitMQ и автоматически поднимают их через Compose:
-
-```bash
-make test-integration
+make infra-erase
 ```
 
 E2E-тест проверяет критический пользовательский поток только через публичный HTTP API: загрузку PNG, ожидание завершения Worker, получение оригинала и двух миниатюр, metadata, удаление и последующие `404`/пустой список.
@@ -321,60 +290,217 @@ E2E-тест проверяет критический пользователь�
 make test-e2e
 ```
 
-Для полного локального набора проверок перед коммитом:
+## Спринт 13 — ☸️ Kubernetes и Helm
+
+> 📋 [Техническое задание спринта 13](docs/specs/13-k8s.md)
+
+В третьем этапе GophProfile перенесён в Kubernetes и упакован в Helm Chart `deploy/helm/gophprofile`. Chart разворачивает Server, Worker, PostgreSQL, MinIO, RabbitMQ, migration Job, HPA, Traefik Ingress, NetworkPolicy, ServiceMonitor и PrometheusRule. `kube-prometheus-stack` остаётся инфраструктурой кластера и устанавливается отдельно.
+
+### Архитектура Kubernetes
+
+```mermaid
+flowchart TB
+    client["Browser / API client"]
+    kubelet["kubelet / cAdvisor<br/>container metrics"]
+
+    subgraph system["kube-system"]
+        traefik["Traefik"]
+        metricsServer["Metrics Server"]
+    end
+
+    subgraph app["namespace: gophprofile · NetworkPolicy: default-deny + explicit allow rules"]
+        ingress["Ingress + Middleware<br/>rate-limit + upload-limit"]
+
+        serverSvc["Service: server<br/>ClusterIP :80"]
+        serverDeployment["Deployment: server"]
+        serverPods["Server Pods<br/>2–10 replicas · :8080"]
+        hpa["HPA: server<br/>min 2 · max 10<br/>CPU 70% · memory 80%"]
+
+        workerSvc["Service: worker-metrics<br/>ClusterIP :9092"]
+        workerDeployment["Deployment: worker<br/>1 replica"]
+        workerPod["Worker Pod<br/>:9092"]
+
+        migrate["Migration Job<br/>install: release resource<br/>upgrade: pre-upgrade hook"]
+
+        postgresSvc["Service: postgres<br/>headless · :5432"]
+        postgresSet["StatefulSet: postgres<br/>1 replica"]
+        postgresPod["PostgreSQL Pod<br/>PVC"]
+
+        minioSvc["Service: minio<br/>headless · :9000 / :9001"]
+        minioSet["StatefulSet: minio<br/>1 replica"]
+        minioPod["MinIO Pod<br/>PVC"]
+
+        rabbitSvc["Service: rabbitmq<br/>headless · :5672 / :15672 / :15692"]
+        rabbitSet["StatefulSet: rabbitmq<br/>1 replica"]
+        rabbitPod["RabbitMQ Pod<br/>PVC"]
+
+        smServer["ServiceMonitor<br/>server"]
+        smWorker["ServiceMonitor<br/>worker"]
+        smRabbit["ServiceMonitor<br/>rabbitmq"]
+        rules["PrometheusRule<br/>gophprofile-alerts"]
+
+        serverDeployment -. manages .-> serverPods
+        hpa -. scales .-> serverDeployment
+        serverSvc --> serverPods
+
+        workerDeployment -. manages .-> workerPod
+        workerSvc --> workerPod
+
+        postgresSet -. manages .-> postgresPod
+        postgresSvc --> postgresPod
+
+        minioSet -. manages .-> minioPod
+        minioSvc --> minioPod
+
+        rabbitSet -. manages .-> rabbitPod
+        rabbitSvc --> rabbitPod
+
+        serverPods --> postgresSvc
+        serverPods --> minioSvc
+        serverPods --> rabbitSvc
+
+        workerPod --> postgresSvc
+        workerPod --> minioSvc
+        workerPod --> rabbitSvc
+        rabbitPod -. deliveries .-> workerPod
+
+        migrate --> postgresSvc
+
+        smServer -. selects .-> serverSvc
+        smWorker -. selects .-> workerSvc
+        smRabbit -. selects .-> rabbitSvc
+    end
+
+    subgraph monitoring["namespace: monitoring · kube-prometheus-stack"]
+        operator["Prometheus Operator"]
+        prometheus["Prometheus"]
+        alertmanager["Alertmanager"]
+        grafana["Grafana<br/>Kubernetes Overview"]
+        kubeState["kube-state-metrics"]
+        nodeExporter["node-exporter"]
+    end
+
+    traefik -. watches .-> ingress
+    client --> traefik --> serverSvc
+
+    metricsServer -. resource metrics .-> hpa
+
+    operator -. watches .-> smServer
+    operator -. watches .-> smWorker
+    operator -. watches .-> smRabbit
+    operator -. watches .-> rules
+    operator -. configures .-> prometheus
+
+    prometheus -. scrapes .-> serverPods
+    prometheus -. scrapes .-> workerPod
+    prometheus -. scrapes .-> rabbitPod
+    prometheus -. scrapes .-> kubeState
+    prometheus -. scrapes .-> nodeExporter
+    prometheus -. scrapes /metrics/cadvisor .-> kubelet
+
+    prometheus --> alertmanager
+    grafana --> prometheus
+```
+
+Публичный трафик проходит через Traefik в Service `server`. Ingress публикует только `/`, `/web` и `/api`; служебные `/live`, `/health` и `/metrics` через публичный Ingress не маршрутизируются. `default-deny` по умолчанию ограничивает ingress/egress, а отдельные NetworkPolicy разрешают Server и Worker обращаться к PostgreSQL, MinIO, RabbitMQ и DNS; migration Job — к PostgreSQL.
+
+Для Server и Worker liveness использует `/live` и проверяет жизнеспособность процесса, а dependency-aware readiness через `/health` проверяет необходимые зависимости. При превышении Ingress rate limit Traefik возвращает `429 Too Many Requests` до передачи запроса Server.
+
+Prometheus Operator отслеживает ServiceMonitor и PrometheusRule. Prometheus собирает метрики Server, Worker и RabbitMQ, а также Kubernetes-метрики из kube-state-metrics и kubelet/cAdvisor; **GophProfile / Kubernetes Overview** в Grafana использует этот Prometheus как источник данных. StatefulSet PostgreSQL, MinIO и RabbitMQ используют persistent volumes.
+
+### Grafana: Kubernetes Overview
+
+<a href="docs/images/k8s/grafana-k8s-overview.jpg">
+  <img src="docs/images/k8s/grafana-k8s-overview-preview.jpg" alt="Grafana Kubernetes Overview Dashboard">
+</a>
+
+### Что добавлено в Kubernetes-этапе
+
+- Helm Chart с `values.yaml` и локальным профилем `values-local.yaml`
+- Deployment для Server и Worker
+- StatefulSet и persistent storage для PostgreSQL, MinIO и RabbitMQ
+- migration Job: обычный ресурс release при install и `pre-upgrade` hook при upgrade
+- readiness и liveness probes
+- resource requests/limits
+- HPA Server: от 2 до 10 replicas, CPU 70%, memory 80%
+- Traefik Ingress с ограничением размера upload и rate limiting `20 rps`, burst `40`
+- `default-deny` NetworkPolicy и явные разрешающие правила
+- запуск application containers без root, с запретом privilege escalation и read-only root filesystem
+- ServiceMonitor для Server, Worker и RabbitMQ
+- PrometheusRule с `HighErrorRate`, `HighResponseTime` и `ServerUnavailable`
+- отдельный `kube-prometheus-stack` для мониторинга Kubernetes-кластера
+
+### Развёртывание в Rancher Desktop
+
+Сначала подготовьте Secret-файлы из `.example` и заполните их локальными значениями:
 
 ```bash
-make ci
-make test-e2e
+cp deploy/k8s/app/secret.yml.example deploy/k8s/app/secret.yml
+cp deploy/k8s/postgres/secret.yml.example deploy/k8s/postgres/secret.yml
+cp deploy/k8s/minio/secret.yml.example deploy/k8s/minio/secret.yml
+cp deploy/k8s/rabbitmq/secret.yml.example deploy/k8s/rabbitmq/secret.yml
 ```
 
-## Хранение и обработка
+Реальные Secret-файлы исключены из Git. Monitoring stack нужен до установки application Chart, потому что Chart создаёт `ServiceMonitor` и `PrometheusRule`. `make k8s-monitoring-up` также автоматически добавляет **GophProfile / Kubernetes Overview** в Grafana из kube-prometheus-stack:
 
-Канонические S3 keys:
-
-```text
-originals/{user_id}/{avatar_id}/{file_name}
-thumbnails/{user_id}/{avatar_id}/100x100.jpg
-thumbnails/{user_id}/{avatar_id}/300x300.jpg
+```bash
+make k8s-monitoring-up
+make helm-check
+make build-k8s-images
 ```
 
-RabbitMQ использует durable direct exchange и очередь с DLQ. Worker работает с manual ack, `prefetch=1`, bounded retry и идемпотентными переходами состояния; повторная доставка уже обработанного события не должна повторять побочные эффекты.
+Namespace и внешние Secrets создаются отдельно от Helm release:
 
-Удаление выполняется в два шага: запись сразу скрывается через soft delete в PostgreSQL, а очистка объектов MinIO выполняется Worker после события `avatar.deleted`.
+```bash
+kubectl create namespace gophprofile --dry-run=client -o yaml | kubectl apply -f -
 
-## Ограничения MVP
+kubectl apply -n gophprofile \
+  -f deploy/k8s/app/secret.yml \
+  -f deploy/k8s/postgres/secret.yml \
+  -f deploy/k8s/minio/secret.yml \
+  -f deploy/k8s/rabbitmq/secret.yml
+```
 
-- `X-User-ID` является идентификатором владельца для учебного MVP и не заменяет реальную аутентификацию или авторизацию.
-- Между PostgreSQL и RabbitMQ не используется transactional outbox: сбои публикации событий обрабатываются recovery-логикой, поэтому атомарной гарантии между изменением данных и публикацией сообщения нет. Операции с S3 также компенсируются на уровне приложения.
-- Миниатюры создаются в размерах `100x100` и `300x300` и всегда сохраняются как JPEG; динамическое преобразование формата не реализовано.
+Локальные параметры образов и Rancher Desktop собраны в `values-local.yaml`. Release устанавливается или обновляется обычной командой Helm:
 
-## Структура проекта
+```bash
+helm upgrade --install gophprofile deploy/helm/gophprofile \
+  --namespace gophprofile \
+  -f deploy/helm/gophprofile/values-local.yaml \
+  --wait \
+  --wait-for-jobs \
+  --timeout 5m
 
-```text
-.
-├── api/                    # OpenAPI-контракт
-├── cmd/
-│   ├── server/             # composition root HTTP Server
-│   └── worker/             # composition root Worker
-├── docs/
-│   └── SPECIFICATION.md    # входная точка к ТЗ спринтов
-├── internal/
-│   ├── broker/rabbitmq/    # RabbitMQ adapter и topology
-│   ├── config/             # environment configuration
-│   ├── event/              # события avatar.uploaded/avatar.deleted
-│   ├── handler/            # HTTP handlers и middleware
-│   ├── health/             # aggregate healthcheck
-│   ├── imageprocessor/     # создание миниатюр
-│   ├── logger/             # slog logging
-│   ├── migration/          # автоматическое применение миграций
-│   ├── model/              # доменная модель
-│   ├── postgres/           # PostgreSQL repository
-│   ├── s3/                 # S3/MinIO adapter
-│   ├── server/             # lifecycle Server
-│   ├── service/            # application services
-│   └── worker/             # обработка RabbitMQ-событий
-├── migrations/             # встроенные SQL-миграции
-├── observability/          # Prometheus, Alertmanager, Grafana, Loki и Alloy
-├── tests/e2e/              # black-box E2E happy path
-└── web/                    # встроенный frontend
+kubectl rollout status deployment/server -n gophprofile --timeout=120s
+kubectl rollout status deployment/worker -n gophprofile --timeout=120s
+```
+
+При первой установке migration Job является обычным ресурсом release: он создается одновременно с PostgreSQL, ждёт доступности БД и применяет миграции. Init containers Server и Worker пропускают workloads только после появления версии `schema_migrations`, соответствующей `migration.targetVersion`, с `dirty=false`, поэтому `helm upgrade --install --wait --wait-for-jobs` дожидается миграций и готовности workloads без взаимной блокировки. При upgrade миграции выполняются отдельным `pre-upgrade` hook `migrate-upgrade` до обновления workloads.
+
+Если tracing включен, NetworkPolicy Server и Worker автоматически разрешает TCP egress на порт из `config.tracing.otlpEndpoint`. При необходимости назначение этого правила дополнительно ограничивается через `networkPolicy.tracingEgress.to` (`podSelector` / `namespaceSelector` для in-cluster collector или `ipBlock` для внешнего endpoint).
+
+Статус release можно посмотреть командой `helm status gophprofile -n gophprofile`, удалить release — `helm uninstall gophprofile -n gophprofile`. Install Job управляется release как обычный ресурс; успешный `pre-upgrade` migration hook удаляется Helm автоматически, а failed hook остаётся для диагностики. Локальные Secrets и persistent PVC в lifecycle Helm release не входят и после uninstall сохраняются.
+
+### Проверка
+
+Проверить Chart до установки:
+
+```bash
+make helm-check
+```
+
+Команда выполняет `helm lint` и semantic render tests из `tests/helm`.
+
+Проверить состояние workloads:
+
+```bash
+kubectl get pods -n gophprofile
+kubectl get hpa -n gophprofile
+kubectl get servicemonitor,prometheusrule -n gophprofile
+```
+
+После доступности Ingress можно выполнить тот же black-box E2E-сценарий уже против Kubernetes:
+
+```bash
+make test-k8s-e2e
 ```

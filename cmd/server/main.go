@@ -20,7 +20,6 @@ import (
 	"github.com/xhrobj/gophprofile/internal/handler"
 	"github.com/xhrobj/gophprofile/internal/health"
 	"github.com/xhrobj/gophprofile/internal/logger"
-	"github.com/xhrobj/gophprofile/internal/migration"
 	"github.com/xhrobj/gophprofile/internal/observability"
 	"github.com/xhrobj/gophprofile/internal/postgres"
 	"github.com/xhrobj/gophprofile/internal/s3"
@@ -82,11 +81,7 @@ func run(ctx context.Context) error {
 	}
 	defer pool.Close()
 
-	if err := migration.Run(pool); err != nil {
-		return fmt.Errorf("run PostgreSQL migrations: %w", err)
-	}
-
-	storage, err := s3.Open(
+	storageClient, err := s3.Open(
 		ctx,
 		cfg.S3Endpoint,
 		cfg.S3AccessKey,
@@ -97,11 +92,13 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open S3 storage: %w", err)
 	}
+	storage := s3.NewResilientStorage(storageClient, lg)
 
-	publisher, err := rabbitmq.OpenPublisher(cfg.RabbitMQURL, cfg.RabbitMQExchange, cfg.RabbitMQQueue)
+	publisherClient, err := rabbitmq.OpenPublisher(cfg.RabbitMQURL, cfg.RabbitMQExchange, cfg.RabbitMQQueue)
 	if err != nil {
 		return fmt.Errorf("open RabbitMQ publisher: %w", err)
 	}
+	publisher := rabbitmq.NewResilientPublisher(publisherClient, lg)
 	defer func() {
 		if closeErr := publisher.Close(); closeErr != nil {
 			lg.WarnContext(ctx, "failed to close RabbitMQ publisher", slog.Any("error", closeErr))
@@ -113,8 +110,9 @@ func run(ctx context.Context) error {
 
 	avatarRepository := postgres.NewAvatarRepository(pool)
 	metrics.RegisterAvatarStorageUsage(ctx, avatarRepository)
+	resilientAvatarRepository := postgres.NewResilientAvatarRepository(avatarRepository, lg)
 	avatarService := service.NewAvatarService(
-		avatarRepository,
+		resilientAvatarRepository,
 		storage,
 		publisher,
 		metrics,

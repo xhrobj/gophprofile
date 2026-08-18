@@ -35,6 +35,9 @@ func TestIntegration_RabbitMQPublisherConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenConsumer() error = %v", err)
 	}
+	if err := consumer.Ping(ctx); err != nil {
+		t.Fatalf("Consumer.Ping() error = %v", err)
+	}
 	t.Cleanup(func() {
 		if err := consumer.Close(); err != nil {
 			t.Errorf("Consumer.Close() error = %v", err)

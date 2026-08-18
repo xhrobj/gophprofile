@@ -2,12 +2,32 @@ package rabbitmq
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/xhrobj/gophprofile/internal/broker"
 )
+
+func TestConsumer_Ping(t *testing.T) {
+	t.Run("canceled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := (&Consumer{}).Ping(ctx)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Ping() error = %v, want %v", err, context.Canceled)
+		}
+	})
+
+	t.Run("missing connection", func(t *testing.T) {
+		err := (&Consumer{}).Ping(context.Background())
+		if err == nil {
+			t.Fatal("Ping() error = nil, want closed connection error")
+		}
+	})
+}
 
 func TestForwardDeliveries_StopsWhenContextAlreadyCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

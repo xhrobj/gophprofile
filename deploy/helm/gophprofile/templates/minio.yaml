@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "minio") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "gophprofile.selectorLabels" (list . "minio") | nindent 4 }}
+  ports:
+    - name: api
+      port: {{ .Values.minio.service.apiPort }}
+      targetPort: api
+    - name: console
+      port: {{ .Values.minio.service.consolePort }}
+      targetPort: console
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "minio") | nindent 4 }}
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "minio") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gophprofile.selectorLabels" (list . "minio") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: minio
+          image: "{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"
+          imagePullPolicy: {{ .Values.minio.image.pullPolicy }}
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+          args:
+            - server
+            - /data
+            - --console-address
+            - :{{ .Values.minio.service.consolePort }}
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.auth.secretName }}
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.auth.secretName }}
+                  key: MINIO_ROOT_PASSWORD
+          ports:
+            - name: api
+              containerPort: {{ .Values.minio.service.apiPort }}
+            - name: console
+              containerPort: {{ .Values.minio.service.consolePort }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- with .Values.minio.persistence.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.minio.persistence.size }}

@@ -1,0 +1,99 @@
+crds:
+  enabled: true
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 96Mi
+
+grafana:
+  enabled: true
+  defaultDashboardsEnabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 192Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+    datasources:
+      uid: prometheus
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      cpu: 150m
+      memory: 96Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+prometheusOperator:
+  prometheusConfigReloader:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 192Mi
+
+prometheus:
+  enabled: true
+  prometheusSpec:
+    retention: 24h
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector: {}
+    ruleNamespaceSelector: {}
+
+# K3s embeds these control-plane components into the k3s process
+
+kubeControllerManager:
+  enabled: false
+
+kubeEtcd:
+  enabled: false
+
+kubeProxy:
+  enabled: false
+
+kubeScheduler:
+  enabled: false

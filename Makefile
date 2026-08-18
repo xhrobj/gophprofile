@@ -1,13 +1,15 @@
 .PHONY: \
 	show-coverage \
-	build build-server build-worker \
+	build build-server build-worker build-migrate build-k8s-images \
+	k8s-monitoring-up k8s-monitoring-down \
+	helm-lint helm-test helm-check \
 	db-up db-connect \
 	s3-up \
 	rabbitmq-up \
 	infra-up infra-down infra-erase \
 	run-server run-worker \
 	compose-up compose-down compose-logs \
-	test-all test test-race test-integration test-e2e \
+	test-all test test-race test-integration test-e2e test-k8s-e2e \
 	coverage \
 	vet lint ci \
 	clean
@@ -34,13 +36,36 @@ BIN_DIR := bin
 
 SERVER := $(BIN_DIR)/server
 WORKER := $(BIN_DIR)/worker
+MIGRATE := $(BIN_DIR)/migrate
+
+# локальные Kubernetes images и Docker context Rancher Desktop
+K8S_DOCKER_CONTEXT ?= rancher-desktop
+K8S_IMAGE_TAG ?= local
+K8S_SERVER_IMAGE ?= gophprofile-server:$(K8S_IMAGE_TAG)
+K8S_WORKER_IMAGE ?= gophprofile-worker:$(K8S_IMAGE_TAG)
+K8S_MIGRATE_IMAGE ?= gophprofile-migrate:$(K8S_IMAGE_TAG)
+
+# Helm Chart приложения
+HELM_CHART ?= deploy/helm/gophprofile
+
+# E2E через локальный Kubernetes Ingress
+K8S_E2E_BASE_URL ?= http://127.0.0.1
+K8S_E2E_HOST ?= gophprofile.local
+
+# Kubernetes monitoring stack
+K8S_MONITORING_NAMESPACE ?= monitoring
+K8S_MONITORING_RELEASE ?= monitoring
+K8S_MONITORING_CHART_VERSION ?= 88.3.0
+K8S_MONITORING_VALUES ?= deploy/k8s/monitoring/values.yml
+K8S_MONITORING_DASHBOARD ?= deploy/k8s/monitoring/dashboards/kubernetes-overview.json
+K8S_MONITORING_DASHBOARD_CONFIGMAP ?= gophprofile-kubernetes-overview
 
 # обновить профиль покрытия и вывести общий процент
 show-coverage: coverage
 	go tool cover -func=coverage.out | tail -n 1
 
-# собрать Сервер и Воркер
-build: build-server build-worker
+# собрать Сервер, Воркер и Мигратор
+build: build-server build-worker build-migrate
 
 # собрать HTTP-сервер
 build-server:
@@ -51,6 +76,60 @@ build-server:
 build-worker:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(WORKER) ./cmd/worker
+
+# собрать Мигратор PostgreSQL
+build-migrate:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(MIGRATE) ./cmd/migrate
+
+# собрать Server, Worker и Migrate images для локального Kubernetes Rancher Desktop
+build-k8s-images:
+	@context="$$(docker context show)"; \
+	if [ "$$context" != "$(K8S_DOCKER_CONTEXT)" ]; then \
+		echo "(o_0) Expected Docker context $(K8S_DOCKER_CONTEXT), got $$context" >&2; \
+		exit 1; \
+	fi
+	docker build --target server -t $(K8S_SERVER_IMAGE) .
+	docker build --target worker -t $(K8S_WORKER_IMAGE) .
+	docker build --target migrate -t $(K8S_MIGRATE_IMAGE) .
+	@printf '(*_*) Built Kubernetes images:\n  %s\n  %s\n  %s\n' \
+		"$(K8S_SERVER_IMAGE)" "$(K8S_WORKER_IMAGE)" "$(K8S_MIGRATE_IMAGE)"
+
+# проверить Helm Chart статическим линтером
+helm-lint:
+	helm lint $(HELM_CHART)
+
+# проверить критичные контракты rendered Helm manifests
+helm-test:
+	go test -tags=helm -count=1 ./tests/helm
+
+# выполнить все локальные проверки Helm Chart
+helm-check: helm-lint helm-test
+
+# установить или обновить Kubernetes monitoring stack через Helm
+k8s-monitoring-up:
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
+	helm upgrade --install $(K8S_MONITORING_RELEASE) prometheus-community/kube-prometheus-stack \
+		--version $(K8S_MONITORING_CHART_VERSION) \
+		--namespace $(K8S_MONITORING_NAMESPACE) \
+		--create-namespace \
+		--values $(K8S_MONITORING_VALUES) \
+		--wait \
+		--timeout 10m
+	kubectl create configmap $(K8S_MONITORING_DASHBOARD_CONFIGMAP) \
+		--namespace $(K8S_MONITORING_NAMESPACE) \
+		--from-file=kubernetes-overview.json=$(K8S_MONITORING_DASHBOARD) \
+		--dry-run=client -o yaml | kubectl apply -f -
+	kubectl label configmap $(K8S_MONITORING_DASHBOARD_CONFIGMAP) \
+		--namespace $(K8S_MONITORING_NAMESPACE) \
+		grafana_dashboard=1 --overwrite
+
+# удалить Kubernetes monitoring stack
+k8s-monitoring-down:
+	kubectl delete configmap $(K8S_MONITORING_DASHBOARD_CONFIGMAP) \
+		--namespace $(K8S_MONITORING_NAMESPACE) \
+		--ignore-not-found
+	helm uninstall $(K8S_MONITORING_RELEASE) --namespace $(K8S_MONITORING_NAMESPACE)
 
 # создать (при необходимости) и запустить локальный PostgreSQL и дождаться его готовности
 db-up:
@@ -80,13 +159,15 @@ infra-erase:
 	docker compose --profile observability down -v
 
 # собрать и запустить Сервер
-run-server: infra-up build-server
+run-server: infra-up build-server build-migrate
 	docker compose --profile observability up -d --wait jaeger
+	$(MIGRATE)
 	$(SERVER)
 
 # собрать и запустить Воркер
-run-worker: infra-up build-worker
+run-worker: infra-up build-worker build-migrate
 	docker compose --profile observability up -d --wait jaeger
+	$(MIGRATE)
 	$(WORKER)
 
 # собрать и запустить полный локальный стек приложения:
@@ -118,8 +199,15 @@ test-integration: infra-up
 	go test -tags=integration -count=1 ./...
 
 # запустить end-to-end happy path через публичный HTTP API полного Compose-стека
+# NOTE: если в "тестовом кластере" мало ресурсов, после не забыть выполнить `make compose-down`
 test-e2e: compose-up
 	E2E_BASE_URL=http://127.0.0.1:8080 go test -tags=e2e -count=1 ./tests/e2e
+
+# запустить end-to-end Happy Path через Traefik Ingress локального Kubernetes
+test-k8s-e2e:
+	E2E_BASE_URL=$(K8S_E2E_BASE_URL) \
+	E2E_HOST=$(K8S_E2E_HOST) \
+	go test -tags=e2e -count=1 ./tests/e2e
 
 # запустить обычные и интеграционные тесты
 # и сохранить атомарный профиль покрытия всего проекта

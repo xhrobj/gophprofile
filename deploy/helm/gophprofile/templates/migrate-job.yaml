@@ -1,0 +1,84 @@
+{{- if .Values.migration.enabled }}
+{{- if and .Values.secrets.create .Release.IsUpgrade }}
+{{- $newDatabaseDsn := required "secrets.databaseDsn is required when secrets.create=true" .Values.secrets.databaseDsn }}
+{{- $existingSecret := lookup "v1" "Secret" .Release.Namespace .Values.secrets.name }}
+{{- if not $existingSecret }}
+{{- fail (printf "managed Secret %q must already exist before upgrading with migration.enabled=true" .Values.secrets.name) }}
+{{- end }}
+{{- $existingData := default (dict) $existingSecret.data }}
+{{- $encodedDatabaseDsn := default "" (index $existingData "DATABASE_DSN") }}
+{{- if not $encodedDatabaseDsn }}
+{{- fail (printf "managed Secret %q must contain DATABASE_DSN before upgrade" .Values.secrets.name) }}
+{{- end }}
+{{- $existingDatabaseDsn := b64dec $encodedDatabaseDsn }}
+{{- if ne $existingDatabaseDsn $newDatabaseDsn }}
+{{- fail "secrets.databaseDsn cannot be changed during helm upgrade when secrets.create=true and migration.enabled=true; update an external Secret before upgrade or keep the managed DATABASE_DSN unchanged" }}
+{{- end }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ if .Release.IsUpgrade }}migrate-upgrade{{ else }}migrate{{ end }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "migrate") | nindent 4 }}
+  {{- if .Release.IsUpgrade }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  {{- end }}
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "gophprofile.selectorLabels" (list . "migrate") | nindent 8 }}
+    spec:
+      serviceAccountName: gophprofile-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -p {{ .Values.postgres.service.port }} -U {{ .Values.postgres.user }} -d {{ .Values.postgres.database }} -t 1; do
+                sleep 1
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.migration.waitForPostgres.resources | nindent 12 }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.migration.image.repository }}:{{ .Values.migration.image.tag }}"
+          imagePullPolicy: {{ .Values.migration.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+          env:
+            - name: DATABASE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: DATABASE_DSN
+{{- end }}

@@ -12,7 +12,8 @@ COPY web ./web
 
 RUN mkdir -p /out \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server \
-    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
 FROM alpine:3.23 AS runtime
 
@@ -41,3 +42,9 @@ COPY --from=builder /out/worker /app/worker
 EXPOSE 9092
 
 ENTRYPOINT ["/app/worker"]
+
+FROM runtime AS migrate
+
+COPY --from=builder /out/migrate /app/migrate
+
+ENTRYPOINT ["/app/migrate"]

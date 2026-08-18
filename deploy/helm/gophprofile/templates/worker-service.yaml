@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "worker") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "gophprofile.selectorLabels" (list . "worker") | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9092
+      targetPort: metrics
+      protocol: TCP

@@ -78,7 +78,7 @@ func (h *deleteHandler) writeDeleteError(w http.ResponseWriter, r *http.Request,
 		writeError(w, r, http.StatusNotFound, "avatar_not_found", "avatar not found", 0)
 	case errors.Is(err, service.ErrServiceUnavailable):
 		logger.WithRequestID(h.logger, RequestIDFromContext(r.Context())).ErrorContext(r.Context(),
-			"failed to publish avatar deletion event",
+			"avatar deletion dependency unavailable",
 			slog.Any("error", err),
 		)
 		writeError(w, r, http.StatusServiceUnavailable, "service_unavailable", "service temporarily unavailable", 0)

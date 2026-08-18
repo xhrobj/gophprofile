@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -20,52 +21,42 @@ import (
 )
 
 const (
-	publisherConfirmTimeout     = 5 * time.Second
-	rabbitMQInstrumentationName = "github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
+	publisherConfirmTimeout       = 5 * time.Second
+	rabbitMQDefaultConnectTimeout = 30 * time.Second
+	rabbitMQInstrumentationName   = "github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 )
 
 type amqpTableCarrier amqp.Table
 
+type contextMutex struct {
+	once  sync.Once
+	token chan struct{}
+}
+
 // Publisher публикует события аватаров в RabbitMQ с publisher confirms.
 type Publisher struct {
+	url        string
 	connection *amqp.Connection
 	channel    *amqp.Channel
 	exchange   string
-	mu         sync.Mutex
+	queue      string
+	mu         contextMutex
+	closed     bool
 }
 
 // OpenPublisher подключается к RabbitMQ, идемпотентно объявляет topology и включает publisher confirms.
 func OpenPublisher(url, exchange, queue string) (*Publisher, error) {
-	connection, err := amqp.Dial(url)
+	connection, channel, err := openPublisherConnection(context.Background(), url, exchange, queue)
 	if err != nil {
-		return nil, fmt.Errorf("dial RabbitMQ: %w", err)
-	}
-
-	channel, err := connection.Channel()
-	if err != nil {
-		_ = connection.Close()
-
-		return nil, fmt.Errorf("open RabbitMQ channel: %w", err)
-	}
-
-	if err := declareTopology(channel, exchange, queue); err != nil {
-		_ = channel.Close()
-		_ = connection.Close()
-
 		return nil, err
 	}
 
-	if err := channel.Confirm(false); err != nil {
-		_ = channel.Close()
-		_ = connection.Close()
-
-		return nil, fmt.Errorf("enable RabbitMQ publisher confirms: %w", err)
-	}
-
 	return &Publisher{
+		url:        url,
 		connection: connection,
 		channel:    channel,
 		exchange:   exchange,
+		queue:      queue,
 	}, nil
 }
 
@@ -98,20 +89,22 @@ func (p *Publisher) PublishAvatarDeleted(ctx context.Context, avatar model.Avata
 	return p.publish(ctx, event.AvatarDeletedRoutingKey, message.MessageID, message.CreatedAt, message)
 }
 
-// Ping проверяет, что RabbitMQ connection и channel Publisher остаются открытыми.
+// Ping проверяет доступность RabbitMQ и восстанавливает publisher connection после разрыва.
 func (p *Publisher) Ping(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if p.connection == nil || p.connection.IsClosed() {
-		return errors.New("rabbitmq connection is closed")
+	if err := p.mu.LockContext(ctx); err != nil {
+		return err
 	}
-	if p.channel == nil || p.channel.IsClosed() {
-		return errors.New("rabbitmq channel is closed")
+	defer p.mu.Unlock()
+
+	if err := p.ensureConnectedLocked(ctx); err != nil {
+		return err
 	}
 
-	return nil
+	return ctx.Err()
 }
 
 // Close закрывает RabbitMQ channel и connection Publisher.
@@ -119,19 +112,49 @@ func (p *Publisher) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var resultErr error
-	if p.channel != nil {
-		if err := p.channel.Close(); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("close RabbitMQ channel: %w", err))
-		}
-	}
-	if p.connection != nil {
-		if err := p.connection.Close(); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("close RabbitMQ connection: %w", err))
-		}
+	p.closed = true
+
+	return p.closeConnectionLocked()
+}
+
+func (m *contextMutex) Lock() {
+	_ = m.LockContext(context.Background())
+}
+
+func (m *contextMutex) LockContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
-	return resultErr
+	m.once.Do(func() {
+		m.token = make(chan struct{}, 1)
+		m.token <- struct{}{}
+	})
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.token:
+		if err := ctx.Err(); err != nil {
+			m.token <- struct{}{}
+
+			return err
+		}
+
+		return nil
+	}
+}
+
+func (m *contextMutex) Unlock() {
+	m.once.Do(func() {
+		m.token = make(chan struct{}, 1)
+	})
+
+	select {
+	case m.token <- struct{}{}:
+	default:
+		panic("unlock of unlocked contextMutex")
+	}
 }
 
 func (c amqpTableCarrier) Get(key string) string {
@@ -194,8 +217,21 @@ func (p *Publisher) publish(
 	headers := amqp.Table{}
 	otel.GetTextMapPropagator().Inject(ctx, amqpTableCarrier(headers))
 
-	p.mu.Lock()
+	if err := p.mu.LockContext(ctx); err != nil {
+		return err
+	}
+	defer p.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := p.ensureConnectedLocked(ctx); err != nil {
+		return fmt.Errorf("connect RabbitMQ before publishing %s event: %w", routingKey, err)
+	}
+
 	confirmCtx, cancel := context.WithTimeout(ctx, publisherConfirmTimeout)
+	defer cancel()
+
 	confirmation, err := p.channel.PublishWithDeferredConfirmWithContext(
 		confirmCtx,
 		p.exchange,
@@ -212,9 +248,6 @@ func (p *Publisher) publish(
 			Body:         body,
 		},
 	)
-	p.mu.Unlock()
-	defer cancel()
-
 	if err != nil {
 		return fmt.Errorf("publish %s event: %w", routingKey, err)
 	}
@@ -231,6 +264,172 @@ func (p *Publisher) publish(
 	}
 
 	return nil
+}
+
+func (p *Publisher) ensureConnectedLocked(ctx context.Context) error {
+	if p.closed {
+		return errors.New("rabbitmq publisher is closed")
+	}
+	if p.connection != nil && !p.connection.IsClosed() && p.channel != nil && !p.channel.IsClosed() {
+		return nil
+	}
+
+	_ = p.closeConnectionLocked()
+
+	connection, channel, err := openPublisherConnection(ctx, p.url, p.exchange, p.queue)
+	if err != nil {
+		return err
+	}
+
+	p.connection = connection
+	p.channel = channel
+
+	return nil
+}
+
+func (p *Publisher) closeConnectionLocked() error {
+	var resultErr error
+	if p.channel != nil && !p.channel.IsClosed() {
+		if err := p.channel.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close RabbitMQ channel: %w", err))
+		}
+	}
+	if p.connection != nil && !p.connection.IsClosed() {
+		if err := p.connection.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close RabbitMQ connection: %w", err))
+		}
+	}
+
+	p.channel = nil
+	p.connection = nil
+
+	return resultErr
+}
+
+func openPublisherConnection(
+	ctx context.Context,
+	url string,
+	exchange string,
+	queue string,
+) (*amqp.Connection, *amqp.Channel, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	uri, err := amqp.ParseURI(url)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse RabbitMQ URL: %w", err)
+	}
+
+	connectTimeout := rabbitMQDefaultConnectTimeout
+	if uri.ConnectionTimeout > 0 {
+		connectTimeout = time.Duration(uri.ConnectionTimeout) * time.Millisecond
+	}
+
+	connectCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+
+	setupDone := make(chan struct{})
+	var setupDoneOnce sync.Once
+	finishSetup := func() {
+		setupDoneOnce.Do(func() {
+			close(setupDone)
+		})
+	}
+	defer finishSetup()
+
+	connection, err := dialPublisherConnection(connectCtx, url, setupDone)
+	if err != nil {
+		if ctxErr := connectCtx.Err(); ctxErr != nil {
+			return nil, nil, fmt.Errorf("dial RabbitMQ: %w", ctxErr)
+		}
+
+		return nil, nil, fmt.Errorf("dial RabbitMQ: %w", err)
+	}
+
+	channel, err := connection.Channel()
+	if err != nil {
+		_ = connection.Close()
+
+		if ctxErr := connectCtx.Err(); ctxErr != nil {
+			return nil, nil, fmt.Errorf("open RabbitMQ channel: %w", ctxErr)
+		}
+
+		return nil, nil, fmt.Errorf("open RabbitMQ channel: %w", err)
+	}
+
+	if err := declareTopology(channel, exchange, queue); err != nil {
+		_ = channel.Close()
+		_ = connection.Close()
+
+		if ctxErr := connectCtx.Err(); ctxErr != nil {
+			return nil, nil, fmt.Errorf("declare RabbitMQ topology: %w", ctxErr)
+		}
+
+		return nil, nil, err
+	}
+
+	if err := channel.Confirm(false); err != nil {
+		_ = channel.Close()
+		_ = connection.Close()
+
+		if ctxErr := connectCtx.Err(); ctxErr != nil {
+			return nil, nil, fmt.Errorf("enable RabbitMQ publisher confirms: %w", ctxErr)
+		}
+
+		return nil, nil, fmt.Errorf("enable RabbitMQ publisher confirms: %w", err)
+	}
+
+	if err := connectCtx.Err(); err != nil {
+		_ = channel.Close()
+		_ = connection.Close()
+
+		return nil, nil, err
+	}
+
+	finishSetup()
+
+	return connection, channel, nil
+}
+
+func dialPublisherConnection(
+	ctx context.Context,
+	url string,
+	setupDone <-chan struct{},
+) (*amqp.Connection, error) {
+	return amqp.DialConfig(url, amqp.Config{
+		Dial: func(network, addr string) (net.Conn, error) {
+			connection, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+
+			if deadline, ok := ctx.Deadline(); ok {
+				if err := connection.SetDeadline(deadline); err != nil {
+					_ = connection.Close()
+
+					return nil, err
+				}
+			}
+
+			go interruptRabbitMQSetup(ctx, setupDone, connection)
+
+			return connection, nil
+		},
+	})
+}
+
+func interruptRabbitMQSetup(ctx context.Context, setupDone <-chan struct{}, connection net.Conn) {
+	select {
+	case <-ctx.Done():
+		select {
+		case <-setupDone:
+			return
+		default:
+			_ = connection.SetDeadline(time.Now())
+		}
+	case <-setupDone:
+	}
 }
 
 func avatarS3Keys(avatar model.Avatar) []string {

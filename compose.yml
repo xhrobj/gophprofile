@@ -14,6 +14,17 @@ x-app-environment: &app-environment
   LOG_LEVEL: ${LOG_LEVEL}
 
 services:
+  migrate:
+    build:
+      context: .
+      target: migrate
+    image: gophprofile-migrate:local
+    environment:
+      DATABASE_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   server:
     build:
       context: .
@@ -29,6 +40,8 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       minio:
@@ -51,6 +64,8 @@ services:
     ports:
       - "127.0.0.1:9092:9092"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       minio:
@@ -125,8 +140,9 @@ services:
         - CMD
         - /usr/bin/loki
         - -health
-      interval: 5s
-      timeout: 5s
+      start_period: 30s
+      interval: 10s
+      timeout: 10s
       retries: 5
 
   alloy:
@@ -233,7 +249,7 @@ services:
         - CMD
         - rabbitmq-diagnostics
         - -q
-        - ping
+        - check_port_connectivity
       interval: 5s
       timeout: 5s
       retries: 5

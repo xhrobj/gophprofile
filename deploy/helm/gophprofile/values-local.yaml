@@ -1,0 +1,27 @@
+server:
+  image:
+    tag: local
+    pullPolicy: Never
+  hpa:
+    enabled: true
+
+worker:
+  image:
+    tag: local
+    pullPolicy: Never
+
+migration:
+  image:
+    tag: local
+    pullPolicy: Never
+
+ingress:
+  enabled: true
+  className: traefik
+  host: gophprofile.local
+
+networkPolicy:
+  enabled: true
+
+monitoring:
+  enabled: true

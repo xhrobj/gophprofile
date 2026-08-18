@@ -17,6 +17,7 @@ const deleteRollbackTimeout = 2 * time.Second
 func (s *AvatarService) DeleteByID(ctx context.Context, avatarID, requesterUserID string) (resultErr error) {
 	ctx, span := otel.Tracer(serviceInstrumentationName).Start(ctx, "delete avatar")
 	defer func() {
+		resultErr = normalizeDependencyError(resultErr)
 		finishSpan(span, resultErr)
 		if s.metrics != nil {
 			s.metrics.ObserveAvatarDeletion(resultErr == nil)
@@ -35,6 +36,7 @@ func (s *AvatarService) DeleteByID(ctx context.Context, avatarID, requesterUserI
 func (s *AvatarService) DeleteCurrentByUserID(ctx context.Context, userID, requesterUserID string) (resultErr error) {
 	ctx, span := otel.Tracer(serviceInstrumentationName).Start(ctx, "delete avatar")
 	defer func() {
+		resultErr = normalizeDependencyError(resultErr)
 		finishSpan(span, resultErr)
 		if s.metrics != nil {
 			s.metrics.ObserveAvatarDeletion(resultErr == nil)

@@ -66,6 +66,35 @@ func (t *Tracing) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (s telemetryNoiseSampler) ShouldSample(params sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	for _, attr := range params.Attributes {
+		if attr.Key == semconv.URLPathKey {
+			path := attr.Value.AsString()
+			if path == "/live" || path == "/health" || path == "/metrics" {
+				return sdktrace.NeverSample().ShouldSample(params)
+			}
+		}
+	}
+
+	return s.fallback.ShouldSample(params)
+}
+
+func (s telemetryNoiseSampler) Description() string {
+	return "TelemetryNoiseSampler"
+}
+
+func (s suppressTracingSampler) ShouldSample(params sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	if tracingSuppressed(params.ParentContext) {
+		return sdktrace.NeverSample().ShouldSample(params)
+	}
+
+	return s.fallback.ShouldSample(params)
+}
+
+func (s suppressTracingSampler) Description() string {
+	return "SuppressTracingSampler"
+}
+
 func traceEndpoint(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	parsed, err := url.Parse(value)
@@ -96,19 +125,6 @@ func traceResource(serviceName string) (*resource.Resource, error) {
 	return res, nil
 }
 
-func (s telemetryNoiseSampler) ShouldSample(params sdktrace.SamplingParameters) sdktrace.SamplingResult {
-	for _, attr := range params.Attributes {
-		if attr.Key == semconv.URLPathKey {
-			path := attr.Value.AsString()
-			if path == "/health" || path == "/metrics" {
-				return sdktrace.NeverSample().ShouldSample(params)
-			}
-		}
-	}
-
-	return s.fallback.ShouldSample(params)
-}
-
 func suppressTracing(ctx context.Context) context.Context {
 	return context.WithValue(ctx, suppressTracingContextKey{}, true)
 }
@@ -117,22 +133,6 @@ func tracingSuppressed(ctx context.Context) bool {
 	suppressed, _ := ctx.Value(suppressTracingContextKey{}).(bool)
 
 	return suppressed
-}
-
-func (s telemetryNoiseSampler) Description() string {
-	return "TelemetryNoiseSampler"
-}
-
-func (s suppressTracingSampler) ShouldSample(params sdktrace.SamplingParameters) sdktrace.SamplingResult {
-	if tracingSuppressed(params.ParentContext) {
-		return sdktrace.NeverSample().ShouldSample(params)
-	}
-
-	return s.fallback.ShouldSample(params)
-}
-
-func (s suppressTracingSampler) Description() string {
-	return "SuppressTracingSampler"
 }
 
 func installTracing(res *resource.Resource, exporter sdktrace.SpanExporter) *Tracing {

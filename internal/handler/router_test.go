@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -105,6 +106,76 @@ func TestRouter_RequestID(t *testing.T) {
 	}
 }
 
+func TestRequestIDMiddleware_GenerationFailureUsesSafeJSONError(t *testing.T) {
+	generateErr := errors.New("entropy source failed with secret details")
+	middleware := requestIDMiddlewareWithGenerator(discardLogger(), func() (string, error) {
+		return "", generateErr
+	})
+	handler := middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next handler must not be called")
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("response status = %d, want %d", response.Code, http.StatusInternalServerError)
+	}
+	if got := response.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", got)
+	}
+	if strings.Contains(response.Body.String(), generateErr.Error()) {
+		t.Error("response leaks request ID generation error")
+	}
+
+	var body errorResponse
+	decodeJSONResponse(t, response, &body)
+	if body.Error != "internal_error" || body.Details != "internal server error" {
+		t.Errorf("response body = %+v, want safe internal_error", body)
+	}
+	if body.RequestID != "" {
+		t.Errorf("request_id = %q, want empty when generation failed", body.RequestID)
+	}
+}
+
+func TestRouter_ErrorContractForUnmatchedRouteAndMethod(t *testing.T) {
+	router := NewRouter(discardLogger(), noopAvatarService{}, noopHealthChecker{}, 10<<20, nil)
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "not found",
+			method:     http.MethodGet,
+			path:       "/missing",
+			wantStatus: http.StatusNotFound,
+			wantCode:   "not_found",
+		},
+		{
+			name:       "method not allowed",
+			method:     http.MethodPost,
+			path:       "/health",
+			wantStatus: http.StatusMethodNotAllowed,
+			wantCode:   "method_not_allowed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(tt.method, tt.path, nil)
+			response := httptest.NewRecorder()
+
+			router.ServeHTTP(response, request)
+
+			assertErrorResponse(t, response, tt.wantStatus, tt.wantCode, 0)
+		})
+	}
+}
+
 func TestRouter_Tracing(t *testing.T) {
 	previousProvider := otel.GetTracerProvider()
 	previousPropagator := otel.GetTextMapPropagator()
@@ -152,6 +223,7 @@ func TestRouter_HTTPMetrics(t *testing.T) {
 	paths := []string{
 		"/web/gallery/Alice",
 		"/missing/c0decafe-babe-4bed-b042-feeddeadbeef",
+		"/live",
 		"/health",
 		"/metrics",
 	}

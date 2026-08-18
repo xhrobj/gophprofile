@@ -15,6 +15,7 @@ import (
 
 	"github.com/xhrobj/gophprofile/internal/broker/rabbitmq"
 	"github.com/xhrobj/gophprofile/internal/config"
+	"github.com/xhrobj/gophprofile/internal/health"
 	"github.com/xhrobj/gophprofile/internal/imageprocessor"
 	"github.com/xhrobj/gophprofile/internal/logger"
 	"github.com/xhrobj/gophprofile/internal/observability"
@@ -72,7 +73,7 @@ func run(ctx context.Context) error {
 	}
 	defer pool.Close()
 
-	storage, err := s3.Open(
+	storageClient, err := s3.Open(
 		ctx,
 		cfg.S3Endpoint,
 		cfg.S3AccessKey,
@@ -83,6 +84,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open S3 storage: %w", err)
 	}
+	storage := s3.NewResilientStorage(storageClient, lg)
 
 	consumer, err := rabbitmq.OpenConsumer(cfg.RabbitMQURL, cfg.RabbitMQExchange, cfg.RabbitMQQueue)
 	if err != nil {
@@ -101,7 +103,10 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("listen for Worker metrics on %s: %w", cfg.MetricsAddress, err)
 	}
 
+	healthChecker := health.NewChecker(pool, storage, consumer)
 	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/live", health.NewLivenessHandler())
+	metricsMux.Handle("/health", health.NewReadinessHandler(healthChecker))
 	metricsMux.Handle("/metrics", metrics.Handler())
 	metricsServer := &http.Server{
 		Addr:              cfg.MetricsAddress,
@@ -113,9 +118,10 @@ func run(ctx context.Context) error {
 		),
 	}
 
+	avatarRepository := postgres.NewResilientAvatarRepository(postgres.NewAvatarRepository(pool), lg)
 	avatarWorker := worker.New(
 		consumer,
-		postgres.NewAvatarRepository(pool),
+		avatarRepository,
 		storage,
 		imageprocessor.New(),
 		metrics,

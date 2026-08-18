@@ -47,12 +47,20 @@ func NewRouter(
 	}
 	router.Use(accessLogMiddleware(baseLogger))
 
+	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, r, http.StatusNotFound, "not_found", "resource not found", 0)
+	})
+	router.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", 0)
+	})
+
 	webHandler := web.Handler()
 
 	router.Get("/", webHandler.ServeHTTP)
 	router.Get("/web/upload", webHandler.ServeHTTP)
 	router.Get("/web/gallery/{userID}", webHandler.ServeHTTP)
 
+	router.Get("/live", newLivenessHandler())
 	router.Get("/health", newHealthHandler(healthChecker))
 	if metrics != nil {
 		router.Handle("/metrics", metrics.Handler())

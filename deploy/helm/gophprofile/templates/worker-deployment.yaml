@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gophprofile.labels" (list . "worker") | nindent 4 }}
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" (list . "worker") | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "gophprofile.selectorLabels" (list . "worker") | nindent 8 }}
+    spec:
+      serviceAccountName: gophprofile-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: {{ .Values.pod.terminationGracePeriodSeconds }}
+      {{- if .Values.migration.enabled }}
+      initContainers:
+        {{- include "gophprofile.waitForSchemaInitContainer" . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: metrics
+              containerPort: 9092
+          envFrom:
+            - configMapRef:
+                name: gophprofile-config
+            - secretRef:
+                name: {{ .Values.secrets.name }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: metrics
+            {{- toYaml .Values.worker.livenessProbe | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            {{- toYaml .Values.worker.readinessProbe | nindent 12 }}
+      restartPolicy: Always

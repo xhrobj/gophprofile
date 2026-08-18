@@ -1,0 +1,7 @@
+apiVersion: v2
+name: gophprofile
+description: Helm chart for GophProfile
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+icon: https://raw.githubusercontent.com/xhrobj/gophprofile/main/deploy/helm/gophprofile/icon.png

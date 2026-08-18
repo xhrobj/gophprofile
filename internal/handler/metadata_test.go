@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/xhrobj/gophprofile/internal/model"
+	"github.com/xhrobj/gophprofile/internal/service"
 )
 
 type fakeAvatarMetadataReader struct {
@@ -226,11 +227,25 @@ func TestMetadataHandler_Error(t *testing.T) {
 			wantCode:    "avatar_not_found",
 		},
 		{
+			name:        "metadata dependency unavailable",
+			path:        "/api/v1/avatars/" + testAvatarID + "/metadata",
+			metadataErr: service.ErrServiceUnavailable,
+			wantStatus:  http.StatusServiceUnavailable,
+			wantCode:    "service_unavailable",
+		},
+		{
 			name:        "metadata internal error",
 			path:        "/api/v1/avatars/" + testAvatarID + "/metadata",
 			metadataErr: errors.New("metadata"),
 			wantStatus:  http.StatusInternalServerError,
 			wantCode:    "internal_error",
+		},
+		{
+			name:       "list dependency unavailable",
+			path:       "/api/v1/users/Alice/avatars",
+			listErr:    service.ErrServiceUnavailable,
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "service_unavailable",
 		},
 		{
 			name:       "list internal error",

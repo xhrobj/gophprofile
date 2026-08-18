@@ -80,6 +80,21 @@ func (c *Consumer) Consume(ctx context.Context) (<-chan broker.Delivery, error) 
 	return result, nil
 }
 
+// Ping проверяет, что RabbitMQ connection и consumer channel остаются открытыми.
+func (c *Consumer) Ping(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.connection == nil || c.connection.IsClosed() {
+		return errors.New("RabbitMQ consumer connection is closed")
+	}
+	if c.channel == nil || c.channel.IsClosed() {
+		return errors.New("RabbitMQ consumer channel is closed")
+	}
+
+	return nil
+}
+
 // Close закрывает RabbitMQ channel и connection Consumer.
 func (c *Consumer) Close() error {
 	var resultErr error
