@@ -320,7 +320,7 @@ flowchart TB
         workerDeployment["Deployment: worker<br/>1 replica"]
         workerPod["Worker Pod<br/>:9092"]
 
-        migrate["Job: migrate<br/>post-install / pre-upgrade"]
+        migrate["Migration Job<br/>install: release resource<br/>upgrade: pre-upgrade hook"]
 
         postgresSvc["Service: postgres<br/>headless · :5432"]
         postgresSet["StatefulSet: postgres<br/>1 replica"]
@@ -419,7 +419,7 @@ Prometheus Operator отслеживает ServiceMonitor и PrometheusRule. Pro
 - Helm Chart с `values.yaml` и локальным профилем `values-local.yaml`
 - Deployment для Server и Worker
 - StatefulSet и persistent storage для PostgreSQL, MinIO и RabbitMQ
-- migration Job как Helm hook `post-install` / `pre-upgrade`
+- migration Job: обычный ресурс release при install и `pre-upgrade` hook при upgrade
 - readiness и liveness probes
 - resource requests/limits
 - HPA Server: от 2 до 10 replicas, CPU 70%, memory 80%
@@ -475,7 +475,7 @@ kubectl rollout status deployment/server -n gophprofile --timeout=120s
 kubectl rollout status deployment/worker -n gophprofile --timeout=120s
 ```
 
-При первой установке migration Job является обычным ресурсом release: он создается одновременно с PostgreSQL, ждёт доступности БД и применяет миграции. Init containers Server и Worker пропускают workloads только после появления версии `schema_migrations`, соответствующей `migration.targetVersion`, с `dirty=false`, поэтому `helm upgrade --install --wait` не образует цикл с `post-install` hook. При upgrade миграции выполняются отдельным `pre-upgrade` hook `migrate-upgrade` до обновления workloads.
+При первой установке migration Job является обычным ресурсом release: он создается одновременно с PostgreSQL, ждёт доступности БД и применяет миграции. Init containers Server и Worker пропускают workloads только после появления версии `schema_migrations`, соответствующей `migration.targetVersion`, с `dirty=false`, поэтому `helm upgrade --install --wait --wait-for-jobs` дожидается миграций и готовности workloads без взаимной блокировки. При upgrade миграции выполняются отдельным `pre-upgrade` hook `migrate-upgrade` до обновления workloads.
 
 Если tracing включен, NetworkPolicy Server и Worker автоматически разрешает TCP egress на порт из `config.tracing.otlpEndpoint`. При необходимости назначение этого правила дополнительно ограничивается через `networkPolicy.tracingEgress.to` (`podSelector` / `namespaceSelector` для in-cluster collector или `ipBlock` для внешнего endpoint).
 
